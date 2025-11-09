@@ -30,6 +30,7 @@ void setup() {
 
   servo.attach(10);
   
+  servo.write(90);
 
   
   pinMode(TRIG_PIN, OUTPUT);
@@ -68,6 +69,12 @@ void loop() {
 
     distancia = medirDistancia();
 
+    if (distancia == -1 || distancia > 30) {
+      servo.write(90);
+      Serial.println("Objeto no detectado o fuera de rango. Por lo tanto posición del Servo en neutro (90°).");
+      return;
+    }
+
     if (distancia > 2 && distancia < 30) {
 
       error = setpoint - distancia;
@@ -90,6 +97,7 @@ void loop() {
 
 
       salida = map(salida, -150, 150, 0, 150);
+
 
       if (salida < 20) salida = 20;
       if (salida > 160) salida = 160;
