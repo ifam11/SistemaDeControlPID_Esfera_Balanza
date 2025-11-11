@@ -1,10 +1,8 @@
 #include <Servo.h>
 
-
 #define TRIG_PIN 9 
 #define ECHO_PIN 8 
 const int SERVO_PIN = 10;
-
 
 float setpoint = 15.0; 
 
@@ -13,7 +11,6 @@ float error, error_anterior = 0;
 float integral = 0;
 float derivada = 0;
 float salida = 0;
-
 
 float Kp = 8;     
 float Ki = 0.2;   
@@ -25,6 +22,7 @@ unsigned long periodo = 50;
 
 Servo servo;
 
+// Función para obtener distancia filtrada por promedio de lecturas válidas
 float medirDistanciaFiltrada() { 
   const int muestras = 5;
   float suma = 0;
@@ -62,10 +60,8 @@ void setup() {
   Serial.begin(9600);
 
   servo.attach(SERVO_PIN);
-  
   servo.write(90);
 
-  
   pinMode(TRIG_PIN, OUTPUT);
   pinMode(ECHO_PIN, INPUT);
   
@@ -76,7 +72,6 @@ void setup() {
   Serial.println();
 }
 
-
 float medirDistancia() {
   digitalWrite(TRIG_PIN, LOW);
   delayMicroseconds(2);
@@ -84,12 +79,9 @@ float medirDistancia() {
   delayMicroseconds(10);
   digitalWrite(TRIG_PIN, LOW);
 
-
   long duracion = pulseIn(ECHO_PIN, HIGH, 20000); 
 
   float distancia;
-
-  
   if (duracion == 0) {
     distancia = -1; 
   } else {
@@ -102,9 +94,9 @@ float medirDistancia() {
 void loop() {
   tiempo = millis();
   float dt = (tiempo - tiempo_anterior) / 1000.0;
+
   if (tiempo > tiempo_anterior + periodo) {
     tiempo_anterior = tiempo;
-
     distancia = medirDistancia();
 
     if (distancia == -1 || distancia > 30) {
@@ -116,15 +108,10 @@ void loop() {
     }
 
     if (distancia > 2 && distancia < 30) {
-
       error = setpoint - distancia;
 
-
       float PID_p = Kp * error;
-
-
       float PID_d = Kd * ((error - error_anterior) / dt);
-
 
       if (-3 < error && error < 3) {
         integral += Ki * error;
@@ -132,12 +119,8 @@ void loop() {
         integral = 0;
       }
 
-
       salida = PID_p + integral + PID_d;
-
-
       salida = map(salida, -150, 150, 0, 150);
-
 
       if (salida < 20) salida = 20;
       if (salida > 160) salida = 160;
@@ -145,6 +128,7 @@ void loop() {
       float angulo = salida + 30;
       servo.write(angulo);
 
+      // ---------------------- IMPRESIÓN SERIAL ORDENADA ----------------------
       Serial.println("----------------------------------------------");
       Serial.print("Tiempo actual: ");
       Serial.print(tiempo / 1000.0, 2);
@@ -172,10 +156,9 @@ void loop() {
       Serial.print("Ángulo aplicado al servo: ");
       Serial.println(angulo, 2);
       Serial.println("----------------------------------------------");
-      
+      // ----------------------------------------------------------------------
     }
 
     error_anterior = error;
   }
-
 }
