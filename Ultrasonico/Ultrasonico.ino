@@ -22,6 +22,96 @@ unsigned long periodo = 50;
 
 Servo servo;
 
+#define Habilitar_Telemetria true
+
+unsigned long UltimoChequeoSerial = 0;
+unsigned long UltimaEnvioTelemetria = 0;
+bool TelemetriaActiva = true;
+
+void ImprimirTelemetria (){
+  Serial.println(F("---MODO TELEMETRIA ACTIVADO---"));
+  Serial.println(F("Comandos disponibles: "));
+  Serial.println(F("P<valor> = cambia Kp (Ej: P7.5)"));
+  Serial.println(F("I<valor> = cambia Ki (Ej: I0.3)"));
+  Serial.println(F("D<valor> = cambia Kd (Ej: D550)"));
+  Serial.println(F("S = mostrar valores actuales"));
+  Serial.println(F("L = activar/desactivar"));
+}
+
+void ProcesarComandosSerial () {
+  if (millis() - UltimoChequeoSerial < 100) return;
+  UltimoChequeoSerial = millis();
+
+  while (Serial.available() > 0){
+    String comando = Serial.readStringUntil('\n');
+    comando.trim();
+    if (comando.length () == 0) continue;
+
+    char codigoComando = toupper(comando.charAt(0));
+    String valorTexto = comando.substring(1);
+
+    switch (codigoComando) {
+
+      case 'P':
+      Kp = valorTexto.toFloat();
+      Serial.print(F("Nuevo Kp = "));
+      Serial.println(Kp);
+      break;
+
+      case 'I':
+      Ki = valorTexto.toFloat();
+      Serial.print(F("Nuevo Ki = "));
+      Serial.println(Ki);
+      break;
+
+      case 'D':
+      Kd = valorTexto.toFloat();
+      Serial.print(F("Nuevo Kd = "));
+      Serial.println(Kd);
+      break;
+
+      case 'S':
+      Serial.print(F("Kp=")); Serial.print(Kp);
+      Serial.print(F("Ki=")); Serial.print(Ki);
+      Serial.print(F("Kd=")); Serial.print(Kd);
+      break;
+
+      case 'L':
+      TelemetriaActiva = !TelemetriaActiva;
+      Serial.print(F("Telemetria "));
+      Serial.println(TelemetriaActiva ? F("ACTIVADA") : F("DESACTIVADA"));
+      break;
+
+      default:
+      Serial.print(F("Comando no reconocido: "));
+      Serial.println(comando);
+    }
+  }
+}
+
+void EnviarTelemetriaSiCorresponde(float distancia, float setpoint, float salida) {
+
+  if (!Habilitar_Telemetria || !TelemetriaActiva) return;
+  if (millis() - UltimaEnvioTelemetria < 200) return;
+  UltimaEnvioTelemetria = millis();
+
+  Serial.print("Tiempo = ");
+  Serial.print(millis());
+  Serial.print("ms | Distancia = ");
+  Serial.print(distancia);
+  Serial.print("| Setpoint = ");
+  Serial.print(setpoint);
+  Serial.print("| Salida = ");
+  Serial.print(salida);
+  Serial.print("| Kp = ");
+  Serial.print(Kp);
+  Serial.print("| Ki = ");
+  Serial.print(Ki);
+  Serial.print("| Kd = ");
+  Serial.print(Kd);
+
+}
+
 // Función para obtener distancia filtrada por promedio de lecturas válidas
 float medirDistanciaFiltrada() { 
   const int muestras = 5;
@@ -70,6 +160,8 @@ void setup() {
   Serial.println("==============================================");
   Serial.println("Iniciando sistema...");
   Serial.println();
+
+  ImprimirTelemetria();
 }
 
 float medirDistancia() {
@@ -92,6 +184,9 @@ float medirDistancia() {
 }
 
 void loop() {
+
+  ProcesarComandosSerial();
+
   tiempo = millis();
   float dt = (tiempo - tiempo_anterior) / 1000.0;
 
@@ -161,4 +256,7 @@ void loop() {
 
     error_anterior = error;
   }
+
+  EnviarTelemetriaSiCorresponde(distancia, setpoint, salida);
+  
 }
