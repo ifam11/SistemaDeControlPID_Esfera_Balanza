@@ -4,259 +4,85 @@
 #define ECHO_PIN 8 
 const int SERVO_PIN = 10;
 
-float setpoint = 15.0; 
+const float DISTANCE_SETPOINT = 15.71;
+const int SERVO_NEUTRAL_ANGLE = 65;
+const int SERVO_LIMITE_MIN = 25;
+const int SERVO_LIMITE_MAX = 140;
 
-float distancia = 0;
-float error, error_anterior = 0;
-float integral = 0;
-float derivada = 0;
-float salida = 0;
+float kp = 3.5;
+float kd = 350.0;
 
-float Kp = 8;     
-float Ki = 0.2;   
-float Kd = 500; 
+float ki = 0.2;
 
-unsigned long tiempo = 0;
-unsigned long tiempo_anterior = 0;
-unsigned long periodo = 50; 
+Servo myservo;
+float distance = 0.0;
+unsigned long time;
+float distance_previous_error, distance_error;
+int period = 40;
+float PID_p, PID_i, PID_d, PID_total;
 
-Servo servo;
-
-#define Habilitar_Telemetria true
-
-unsigned long UltimoChequeoSerial = 0;
-unsigned long UltimaEnvioTelemetria = 0;
-bool TelemetriaActiva = true;
-
-void ImprimirTelemetria (){
-  Serial.println(F("---MODO TELEMETRIA ACTIVADO---"));
-  Serial.println(F("Comandos disponibles: "));
-  Serial.println(F("P<valor> = cambia Kp (Ej: P7.5)"));
-  Serial.println(F("I<valor> = cambia Ki (Ej: I0.3)"));
-  Serial.println(F("D<valor> = cambia Kd (Ej: D550)"));
-  Serial.println(F("S = mostrar valores actuales"));
-  Serial.println(F("L = activar/desactivar"));
-}
-
-void ProcesarComandosSerial () {
-  if (millis() - UltimoChequeoSerial < 100) return;
-  UltimoChequeoSerial = millis();
-
-  while (Serial.available() > 0){
-    String comando = Serial.readStringUntil('\n');
-    comando.trim();
-    if (comando.length () == 0) continue;
-
-    char codigoComando = toupper(comando.charAt(0));
-    String valorTexto = comando.substring(1);
-
-    switch (codigoComando) {
-
-      case 'P':
-      Kp = valorTexto.toFloat();
-      Serial.print(F("Nuevo Kp = "));
-      Serial.println(Kp);
-      break;
-
-      case 'I':
-      Ki = valorTexto.toFloat();
-      Serial.print(F("Nuevo Ki = "));
-      Serial.println(Ki);
-      break;
-
-      case 'D':
-      Kd = valorTexto.toFloat();
-      Serial.print(F("Nuevo Kd = "));
-      Serial.println(Kd);
-      break;
-
-      case 'S':
-      Serial.print(F("Kp=")); Serial.print(Kp);
-      Serial.print(F("Ki=")); Serial.print(Ki);
-      Serial.print(F("Kd=")); Serial.print(Kd);
-      break;
-
-      case 'L':
-      TelemetriaActiva = !TelemetriaActiva;
-      Serial.print(F("Telemetria "));
-      Serial.println(TelemetriaActiva ? F("ACTIVADA") : F("DESACTIVADA"));
-      break;
-
-      default:
-      Serial.print(F("Comando no reconocido: "));
-      Serial.println(comando);
-    }
-  }
-}
-
-void EnviarTelemetriaSiCorresponde(float distancia, float setpoint, float salida) {
-
-  if (!Habilitar_Telemetria || !TelemetriaActiva) return;
-  if (millis() - UltimaEnvioTelemetria < 200) return;
-  UltimaEnvioTelemetria = millis();
-
-  Serial.print("Tiempo = ");
-  Serial.print(millis());
-  Serial.print("ms | Distancia = ");
-  Serial.print(distancia);
-  Serial.print("| Setpoint = ");
-  Serial.print(setpoint);
-  Serial.print("| Salida = ");
-  Serial.print(salida);
-  Serial.print("| Kp = ");
-  Serial.print(Kp);
-  Serial.print("| Ki = ");
-  Serial.print(Ki);
-  Serial.print("| Kd = ");
-  Serial.print(Kd);
-
-}
-
-// Función para obtener distancia filtrada por promedio de lecturas válidas
 float medirDistanciaFiltrada() { 
   const int muestras = 5;
   float suma = 0;
   int validas = 0;
-
   for (int i = 0; i < muestras; i++) {
+    digitalWrite(TRIG_PIN, LOW); delayMicroseconds(2);
+    digitalWrite(TRIG_PIN, HIGH); delayMicroseconds(10);
     digitalWrite(TRIG_PIN, LOW);
-    delayMicroseconds(2);
-    digitalWrite(TRIG_PIN, HIGH);
-    delayMicroseconds(10);
-    digitalWrite(TRIG_PIN, LOW);
-
-    long duracion = pulseIn(ECHO_PIN, HIGH, 20000); 
-    float d;
-
-    if (duracion == 0) {
-      d = -1;
-    } else {
-      d = duracion * 0.034 / 2;
-    }
-
-    if (d > 0) { 
-      suma += d;
+    long duracion = pulseIn(ECHO_PIN, HIGH, 25000); // Timeout de 25ms
+    if (duracion > 0) { 
+      suma += (duracion * 0.0343) / 2.0;
       validas++;
     }
-    delay(10);
+    delay(5);
   }
-
-  if (validas == 0) return -1; 
-  float promedio = suma / validas;
-  return promedio;
+  return (validas > 0) ? (suma / validas) : -1.0;
 }
 
 void setup() {
-  Serial.begin(9600);
-
-  servo.attach(SERVO_PIN);
-  servo.write(90);
-
+  Serial.begin(115200);  
+  myservo.attach(SERVO_PIN);
+  myservo.write(SERVO_NEUTRAL_ANGLE);
   pinMode(TRIG_PIN, OUTPUT);
   pinMode(ECHO_PIN, INPUT);
-  
-  Serial.println("==============================================");
-  Serial.println(" SISTEMA DE CONTROL PID - BALANZA Y ESFERA ");
-  Serial.println("==============================================");
-  Serial.println("Iniciando sistema...");
-  Serial.println();
-
-  ImprimirTelemetria();
-}
-
-float medirDistancia() {
-  digitalWrite(TRIG_PIN, LOW);
-  delayMicroseconds(2);
-  digitalWrite(TRIG_PIN, HIGH);
-  delayMicroseconds(10);
-  digitalWrite(TRIG_PIN, LOW);
-
-  long duracion = pulseIn(ECHO_PIN, HIGH, 20000); 
-
-  float distancia;
-  if (duracion == 0) {
-    distancia = -1; 
-  } else {
-    distancia = duracion * 0.034 / 2; 
-  }
-
-  return distancia; 
+  time = millis();
 }
 
 void loop() {
+  if (millis() > time + period) {
+    time = millis();    
+    distance = medirDistanciaFiltrada();
 
-  ProcesarComandosSerial();
-
-  tiempo = millis();
-  float dt = (tiempo - tiempo_anterior) / 1000.0;
-
-  if (tiempo > tiempo_anterior + periodo) {
-    tiempo_anterior = tiempo;
-    distancia = medirDistancia();
-
-    if (distancia == -1 || distancia > 30) {
-      servo.write(90);
-      Serial.println("[INFO] Objeto no detectado o fuera de rango.");
-      Serial.println("Servo en posición neutra (90°).");
-      Serial.println("----------------------------------------------");
+    if (distance < 0 || distance > 30) {
+      myservo.write(SERVO_NEUTRAL_ANGLE);
+      PID_i = 0;
+      distance_previous_error = 0;
       return;
     }
-
-    if (distancia > 2 && distancia < 30) {
-      error = setpoint - distancia;
-
-      float PID_p = Kp * error;
-      float PID_d = Kd * ((error - error_anterior) / dt);
-
-      if (-3 < error && error < 3) {
-        integral += Ki * error;
-      } else {
-        integral = 0;
-      }
-
-      salida = PID_p + integral + PID_d;
-      salida = map(salida, -150, 150, 0, 150);
-
-      if (salida < 20) salida = 20;
-      if (salida > 160) salida = 160;
-
-      float angulo = salida + 30;
-      servo.write(angulo);
-
-      // ---------------------- IMPRESIÓN SERIAL ORDENADA ----------------------
-      Serial.println("----------------------------------------------");
-      Serial.print("Tiempo actual: ");
-      Serial.print(tiempo / 1000.0, 2);
-      Serial.println(" s");
-
-      Serial.print("Distancia medida: ");
-      Serial.print(distancia, 2);
-      Serial.println(" cm");
-
-      Serial.print("Error actual: ");
-      Serial.println(error, 2);
-
-      Serial.print("Componente proporcional (P): ");
-      Serial.println(PID_p, 2);
-
-      Serial.print("Componente integral (I): ");
-      Serial.println(integral, 2);
-
-      Serial.print("Componente derivativa (D): ");
-      Serial.println(PID_d, 2);
-
-      Serial.print("Salida PID total: ");
-      Serial.println(salida, 2);
-
-      Serial.print("Ángulo aplicado al servo: ");
-      Serial.println(angulo, 2);
-      Serial.println("----------------------------------------------");
-      // ----------------------------------------------------------------------
+    
+    // --- Cálculo PID ---
+    distance_error = DISTANCE_SETPOINT - distance;   
+    PID_p = kp * distance_error;
+    PID_d = kd * ((distance_error - distance_previous_error) / period);
+      
+    if (-3.5 < distance_error && distance_error < 3.5) { // Ampliamos un poco el rango para que actúe
+      PID_i = PID_i + (ki * distance_error);
+    } else {
+      PID_i = 0;
     }
-
-    error_anterior = error;
-  }
-
-  EnviarTelemetriaSiCorresponde(distancia, setpoint, salida);
   
+    PID_total = PID_p + PID_i + PID_d;  
+
+    int angulo = SERVO_NEUTRAL_ANGLE - PID_total;
+
+    if (angulo < SERVO_LIMITE_MIN) angulo = SERVO_LIMITE_MIN;
+    if (angulo > SERVO_LIMITE_MAX) angulo = SERVO_LIMITE_MAX;
+  
+    myservo.write(angulo);  
+    distance_previous_error = distance_error;
+
+    Serial.print("Dist: "); Serial.print(distance, 2);
+    Serial.print(" | Err: "); Serial.print(distance_error, 2);
+    Serial.print(" | Ang: "); Serial.println(angulo);
+  }
 }
