@@ -6,24 +6,27 @@
 const int SERVO_PIN = 10;
 
 
-float setpoint = 15.0; 
-
-float distancia = 0;
-float error, error_anterior = 0;
-float integral = 0;
-float derivada = 0;
-float salida = 0;
+const float DISTANCIA_SETPOINT = 15.71;
+const int SERVO_NEUTRAL_ANGLE = 65;
+const int SERVO_LIMITE_MIN = 25;
+const int SERVO_LIMITE_MAX = 140;
 
 
-float Kp = 8;     
+float Kp = 4.0;     
 float Ki = 0.2;   
-float Kd = 500; 
+float Kd = 450; 
 
 unsigned long tiempo = 0;
 unsigned long tiempo_anterior = 0;
 unsigned long periodo = 50; 
+float error, error_anterior = 0; 
+float integral = 0; 
+float derivada = 0; 
+float salida = 0;
 
 Servo servo;
+
+float DISTANCIA = 0;
 
 float medirDistanciaFiltrada() { 
   const int muestras = 5;
@@ -59,7 +62,7 @@ float medirDistanciaFiltrada() {
 }
 
 void setup() {
-  Serial.begin(9600);
+  Serial.begin(115200);
 
   servo.attach(SERVO_PIN);
   
@@ -87,16 +90,16 @@ float medirDistancia() {
 
   long duracion = pulseIn(ECHO_PIN, HIGH, 20000); 
 
-  float distancia;
+  float DISTANCIA;
 
   
   if (duracion == 0) {
-    distancia = -1; 
+    DISTANCIA = -1; 
   } else {
-    distancia = duracion * 0.034 / 2; 
+    DISTANCIA = duracion * 0.034 / 2; 
   }
 
-  return distancia; 
+  return DISTANCIA; 
 }
 
 void loop() {
@@ -105,9 +108,9 @@ void loop() {
   if (tiempo > tiempo_anterior + periodo) {
     tiempo_anterior = tiempo;
 
-    distancia = medirDistancia();
+    DISTANCIA = medirDistancia();
 
-    if (distancia == -1 || distancia > 30) {
+    if (DISTANCIA == -1 || DISTANCIA > 30) {
       servo.write(90);
       Serial.println("[INFO] Objeto no detectado o fuera de rango.");
       Serial.println("Servo en posición neutra (90°).");
@@ -115,9 +118,9 @@ void loop() {
       return;
     }
 
-    if (distancia > 2 && distancia < 30) {
+    if (DISTANCIA > 2 && DISTANCIA < 30) {
 
-      error = setpoint - distancia;
+      error = DISTANCIA_SETPOINT - DISTANCIA;
 
 
       float PID_p = Kp * error;
@@ -139,8 +142,8 @@ void loop() {
       salida = map(salida, -150, 150, 0, 150);
 
 
-      if (salida < 20) salida = 20;
-      if (salida > 160) salida = 160;
+      if (salida < 25) salida = 25;
+      if (salida > 140) salida = 140;
 
       float angulo = salida + 30;
       servo.write(angulo);
