@@ -53,6 +53,8 @@ mostrar_info = True
 registrar = False           # control de logging a CSV
 tiempo_inicio = time.time()
 fuente = pygame.font.SysFont("consolas", 16)
+fuente_pequena = pygame.font.SysFont("consolas", 16)
+fuente_grande = pygame.font.SysFont("consolas", 20, bold=True)
 
 def dibujar_rect_rotado(surface, color, cx, cy, w, h, angulo):
     cos_a = math.cos(angulo)
@@ -67,6 +69,45 @@ def dibujar_rect_rotado(surface, color, cx, cy, w, h, angulo):
     pygame.draw.polygon(surface, color, [p1, p2, p3, p4])
     pygame.draw.polygon(surface, ACERO_OSCURO, [p1, p2, p3, p4], 2)
     return p1, p2
+
+def dibujar_panel_info(surface, controlador, bola_pos, punto_referencia, angulo_viga, salida_pid, pausado, registrar):
+    # Panel lateral derecho
+    panel_x = ANCHO - 260
+    panel_y = 20
+    panel_ancho = 240
+    panel_alto = 300
+
+    # Fondo semitransparente
+    panel_surface = pygame.Surface((panel_ancho, panel_alto))
+    panel_surface.set_alpha(120)
+    panel_surface.fill((40, 40, 45))
+    surface.blit(panel_surface, (panel_x, panel_y))
+
+    # Títulos y datos
+    y = panel_y + 10
+    surface.blit(fuente_grande.render("Información", True, (255, 220, 180)), (panel_x + 10, y))
+    y += 35
+
+    # PID
+    surface.blit(fuente_pequena.render("PID:", True, (200, 200, 200)), (panel_x + 10, y))
+    y += 20
+    surface.blit(fuente_pequena.render(f"KP: {controlador.kp:.6f}", True, (220, 220, 220)), (panel_x + 20, y)); y += 20
+    surface.blit(fuente_pequena.render(f"KI: {controlador.ki:.6f}", True, (220, 220, 220)), (panel_x + 20, y)); y += 20
+    surface.blit(fuente_pequena.render(f"KD: {controlador.kd:.6f}", True, (220, 220, 220)), (panel_x + 20, y)); y += 30
+
+    # Estado
+    surface.blit(fuente_pequena.render("Estado del Sistema:", True, (200, 200, 200)), (panel_x + 10, y))
+    y += 20
+    surface.blit(fuente_pequena.render(f"Posición: {bola_pos:.2f}", True, (220, 220, 220)), (panel_x + 20, y)); y += 20
+    surface.blit(fuente_pequena.render(f"Referencia: {punto_referencia:.2f}", True, (220, 220, 220)), (panel_x + 20, y)); y += 20
+    surface.blit(fuente_pequena.render(f"Ángulo: {angulo_viga:.3f}", True, (220, 220, 220)), (panel_x + 20, y)); y += 20
+    surface.blit(fuente_pequena.render(f"Salida PID: {salida_pid:.3f}", True, (220, 220, 220)), (panel_x + 20, y)); y += 30
+
+    # Estado general
+    surface.blit(fuente_pequena.render("Sistema:", True, (200, 200, 200)), (panel_x + 10, y))
+    y += 20
+    surface.blit(fuente_pequena.render(f"Pausa: {'Sí' if pausado else 'No'}", True, (220, 220, 220)), (panel_x + 20, y)); y += 20
+    surface.blit(fuente_pequena.render(f"Registro CSV: {'ON' if registrar else 'OFF'}", True, (220, 220, 220)), (panel_x + 20, y))
 
 while ejecutando:
     ahora = time.time()
@@ -146,17 +187,7 @@ while ejecutando:
 
         # Mostrar información si está activada
         if mostrar_info:
-            error = punto_referencia - bola_pos
-            lineas = [
-                f"KP: {controlador.kp:.6f}  KI: {controlador.ki:.6f}  KD: {controlador.kd:.6f}",
-                f"Pos bola: {bola_pos:.2f}  Referencia: {punto_referencia:.2f}  Error: {error:.2f}",
-                f"Angulo viga: {angulo_viga:.4f}",
-                f"Pausa: {'ON' if pausado else 'OFF'}  Logging: {'ON' if registrar else 'OFF'}",
-                "Teclas: Q/A kp, W/S ki, E/D kd, R reset, SPACE pausa, I info, L log, R-click setpoint"
-            ]
-            for i, txt in enumerate(lineas):
-                surf = fuente.render(txt, True, (220, 220, 220))
-                pantalla.blit(surf, (10, 10 + i * 18))
+            dibujar_panel_info(pantalla, controlador, bola_pos, punto_referencia, angulo_viga, salida_pid, pausado, registrar)
 
         pygame.display.flip()
         reloj.tick(FPS)
@@ -218,17 +249,7 @@ while ejecutando:
     pygame.draw.circle(pantalla, BRILLO, (int(bx - 5), int(by - 5)), 6)
 
     if mostrar_info:
-        error = punto_referencia - bola_pos
-        lineas = [
-            f"KP: {controlador.kp:.6f}  KI: {controlador.ki:.6f}  KD: {controlador.kd:.6f}",
-            f"Pos bola: {bola_pos:.2f}  Referencia: {punto_referencia:.2f}  Error: {error:.2f}",
-            f"Angulo viga: {angulo_viga:.4f}  PID_out: {salida_pid:.4f}",
-            f"Pausa: {'ON' if pausado else 'OFF'}  Logging: {'ON' if registrar else 'OFF'}",
-            "Teclas: Q/A kp, W/S ki, E/D kd, R reset, SPACE pausa, I info, L log, R-click setpoint"
-        ]
-        for i, txt in enumerate(lineas):
-            surf = fuente.render(txt, True, (220, 220, 220))
-            pantalla.blit(surf, (10, 10 + i * 18))
+        dibujar_panel_info(pantalla, controlador, bola_pos, punto_referencia, angulo_viga, salida_pid, pausado, registrar)
 
 
     pygame.display.flip()
