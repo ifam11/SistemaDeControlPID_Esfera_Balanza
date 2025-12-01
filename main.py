@@ -2,6 +2,7 @@ import pygame
 import math
 from config import *
 from simulacion import Balanza, Pelota
+from pid import ControladorPID   # <<< IMPORTA EL PID
 
 def main():
     pygame.init()
@@ -15,8 +16,15 @@ def main():
     balanza = Balanza(ANCHO // 2, ALTURA_PIVOTE)
     bola = Pelota(ANCHO // 2, 200)
 
+ 
+    pid = ControladorPID(kp=0.15, ki=0.02, kd=0.18)
+
+    setpoint = 15  
+
     ejecutando = True
     while ejecutando:
+        dt = reloj.get_time() / 1000.0
+
         for evento in pygame.event.get():
             if evento.type == pygame.QUIT:
                 ejecutando = False
@@ -29,11 +37,20 @@ def main():
             if evento.type == pygame.MOUSEBUTTONUP:
                 bola.agarrada = False
 
-        bola.actualizar(balanza)
-        distancia = balanza.leer_sensor(bola) 
-
-        pantalla.fill(FONDO)
         
+        bola.actualizar(balanza)
+
+        
+        distancia = balanza.leer_sensor(bola)
+
+      
+        torque_pid = pid.calcular(setpoint, distancia, dt)
+
+       
+        balanza.actualizar_fisica(torque_pid)
+
+       
+        pantalla.fill(FONDO)
         pygame.draw.line(pantalla, LINEA_AZUL, (0, ALTURA_PISO), (ANCHO, ALTURA_PISO), 4)
         
         balanza.dibujar(pantalla, fuente_regla)
