@@ -2,7 +2,7 @@ import pygame
 import math
 from config import *
 from simulacion import Balanza, Pelota
-from pid import ControladorPID   # <<< IMPORTA EL PID
+from pid import ControladorPID
 
 def main():
     pygame.init()
@@ -16,19 +16,25 @@ def main():
     balanza = Balanza(ANCHO // 2, ALTURA_PIVOTE)
     bola = Pelota(ANCHO // 2, 200)
 
- 
-    pid = ControladorPID(kp=0.15, ki=0.02, kd=0.18)
+    # PID ajustado para control en PIXELES
+    pid = ControladorPID(kp=0.015, ki=0.0004, kd=0.008)
 
-    setpoint = 15  
+    # ----------- FÍSICA DE LA BALANZA -------------
+    angulo = 0.0
+    vel_angular = 0.0
+
+    inercia = 0.35
+    friccion = 0.15
 
     ejecutando = True
     while ejecutando:
-        dt = reloj.get_time() / 1000.0
+        dt = reloj.tick(FPS) / 1000.0
 
         for evento in pygame.event.get():
             if evento.type == pygame.QUIT:
                 ejecutando = False
             
+            # Agarrar pelota
             if evento.type == pygame.MOUSEBUTTONDOWN:
                 mx, my = pygame.mouse.get_pos()
                 if math.hypot(mx - bola.x, my - bola.y) < RADIO_BOLA_PX * 2:
@@ -37,30 +43,47 @@ def main():
             if evento.type == pygame.MOUSEBUTTONUP:
                 bola.agarrada = False
 
-        
+        # Movimiento de la pelota
         bola.actualizar(balanza)
 
-        
-        distancia = balanza.leer_sensor(bola)
+        # -------- SENSOR REAL EN PIXELES --------
+        distancia = bola.x - balanza.x    # error horizontal real
 
-      
+        # -------- SETPOINT REAL (0 px error) --------
+        setpoint = 0
+
+        # PID → torque
         torque_pid = pid.calcular(setpoint, distancia, dt)
 
-       
-        balanza.actualizar_fisica(torque_pid)
+        # aumentar fuerza disponible
+        torque_pid = max(min(torque_pid, 6.0), -6.0)
 
-       
+        # -------- FÍSICA DE ROTACIÓN --------
+        torque_total = torque_pid - friccion * vel_angular
+        aceleracion = torque_total / inercia
+
+        vel_angular += aceleracion * dt
+        angulo += vel_angular * dt
+
+        # límite angular
+        angulo = max(min(angulo, 0.8), -0.8)
+
+        balanza.angulo = angulo
+
+        # ---------------- DIBUJAR ----------------
         pantalla.fill(FONDO)
         pygame.draw.line(pantalla, LINEA_AZUL, (0, ALTURA_PISO), (ANCHO, ALTURA_PISO), 4)
-        
+
         balanza.dibujar(pantalla, fuente_regla)
         bola.dibujar(pantalla)
 
-        texto = fuente_medida.render(f"Distancia: {distancia:.1f} cm", True, NEGRO)
+        texto = fuente_medida.render(f"Error: {distancia:.1f} px", True, NEGRO)
         pantalla.blit(texto, (ANCHO - 300, 50))
 
+        texto2 = fuente_medida.render(f"Ángulo: {angulo:.2f} rad", True, NEGRO)
+        pantalla.blit(texto2, (ANCHO - 300, 90))
+
         pygame.display.flip()
-        reloj.tick(FPS)
 
     pygame.quit()
 

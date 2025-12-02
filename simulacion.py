@@ -10,29 +10,45 @@ def rotar(x, y, cx, cy, angulo):
     return cx + (dx * cos_a - dy * sin_a), cy + (dx * sin_a + dy * cos_a)
 
 
+class ServoMotor:
+    def __init__(self, velocidad=1.2):
+        self.angulo_actual = 0.0     # radianes
+        self.angulo_objetivo = 0.0   # radianes
+        self.velocidad = velocidad   # rad/s (velocidad máxima)
+
+    def actualizar(self, dt):
+        # Diferencia entre el ángulo actual y objetivo
+        diff = self.angulo_objetivo - self.angulo_actual
+
+        # Si ya está muy cerca, detener
+        if abs(diff) < 0.001:
+            return
+
+        # Limitar velocidad
+        paso = self.velocidad * dt
+
+        if diff > 0:
+            self.angulo_actual += min(paso, diff)
+        else:
+            self.angulo_actual -= min(paso, -diff)
+
+    def fijar_objetivo(self, angulo_rad):
+        # Limitar servo entre -30° y +30°
+        max_ang = math.radians(30)
+        self.angulo_objetivo = max(min(angulo_rad, max_ang), -max_ang)
+
+
 class Balanza:
     def __init__(self, x, y):
         self.x, self.y = x, y
+        self.servo = ServoMotor()
         self.angulo = 0.0
-        self.vel_angular = 0.0
         self.distancia_actual_cm = 0.0
 
-    def actualizar_fisica(self, torque_bola):
-        torque_gravedad = -0.08 * math.sin(self.angulo)
-
-        accel = (torque_bola + torque_gravedad) * 0.2
-        self.vel_angular += accel
-        self.vel_angular *= 0.90
-        self.angulo += self.vel_angular
-
-        if self.angulo > 0.5:
-            self.angulo = 0.5
-            self.vel_angular *= -0.25
-
-        if self.angulo < -0.5:
-            self.angulo = -0.5
-            self.vel_angular *= -0.25
-
+    def actualizar(self, dt):
+        # Actualizar servo y asignar ángulo real de balanza
+        self.servo.actualizar(dt)
+        self.angulo = self.servo.angulo_actual
 
     def leer_sensor(self, bola):
         mitad_ancho = LARGO_VIGA_PX / 2
@@ -130,7 +146,6 @@ class Pelota:
         self.agarrada = False
 
     def actualizar(self, balanza):
-
         if self.agarrada:
             mx, my = pygame.mouse.get_pos()
             self.x, self.y = mx, my
