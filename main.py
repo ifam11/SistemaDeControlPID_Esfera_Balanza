@@ -16,10 +16,10 @@ def main():
     balanza = Balanza(ANCHO // 2, ALTURA_PIVOTE)
     bola = Pelota(ANCHO // 2, 200)
 
-    # PID ajustado para control en PIXELES
+    
     pid = ControladorPID(kp=0.015, ki=0.0004, kd=0.008)
 
-    # ----------- FÍSICA DE LA BALANZA -------------
+   
     angulo = 0.0
     vel_angular = 0.0
 
@@ -34,7 +34,7 @@ def main():
             if evento.type == pygame.QUIT:
                 ejecutando = False
             
-            # Agarrar pelota
+            
             if evento.type == pygame.MOUSEBUTTONDOWN:
                 mx, my = pygame.mouse.get_pos()
                 if math.hypot(mx - bola.x, my - bola.y) < RADIO_BOLA_PX * 2:
@@ -43,34 +43,34 @@ def main():
             if evento.type == pygame.MOUSEBUTTONUP:
                 bola.agarrada = False
 
-        # Movimiento de la pelota
+      
         bola.actualizar(balanza)
 
-        # -------- SENSOR REAL EN PIXELES --------
-        distancia = bola.x - balanza.x    # error horizontal real
+        
+        distancia = bola.x - balanza.x    
 
-        # -------- SETPOINT REAL (0 px error) --------
+        
         setpoint = 0
 
-        # PID → torque
+      
         torque_pid = pid.calcular(setpoint, distancia, dt)
 
-        # aumentar fuerza disponible
+      
         torque_pid = max(min(torque_pid, 6.0), -6.0)
 
-        # -------- FÍSICA DE ROTACIÓN --------
+       
         torque_total = torque_pid - friccion * vel_angular
         aceleracion = torque_total / inercia
 
         vel_angular += aceleracion * dt
         angulo += vel_angular * dt
 
-        # límite angular
+        
         angulo = max(min(angulo, 0.8), -0.8)
 
         balanza.angulo = angulo
 
-        # ---------------- DIBUJAR ----------------
+        
         pantalla.fill(FONDO)
         pygame.draw.line(pantalla, LINEA_AZUL, (0, ALTURA_PISO), (ANCHO, ALTURA_PISO), 4)
 

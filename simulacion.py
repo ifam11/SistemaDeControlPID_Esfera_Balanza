@@ -12,19 +12,19 @@ def rotar(x, y, cx, cy, angulo):
 
 class ServoMotor:
     def __init__(self, velocidad=1.2):
-        self.angulo_actual = 0.0     # radianes
-        self.angulo_objetivo = 0.0   # radianes
-        self.velocidad = velocidad   # rad/s (velocidad máxima)
+        self.angulo_actual = 0.0     
+        self.angulo_objetivo = 0.0   
+        self.velocidad = velocidad   
 
     def actualizar(self, dt):
-        # Diferencia entre el ángulo actual y objetivo
+        
         diff = self.angulo_objetivo - self.angulo_actual
 
-        # Si ya está muy cerca, detener
+        
         if abs(diff) < 0.001:
             return
 
-        # Limitar velocidad
+       
         paso = self.velocidad * dt
 
         if diff > 0:
@@ -33,7 +33,7 @@ class ServoMotor:
             self.angulo_actual -= min(paso, -diff)
 
     def fijar_objetivo(self, angulo_rad):
-        # Limitar servo entre -30° y +30°
+        
         max_ang = math.radians(30)
         self.angulo_objetivo = max(min(angulo_rad, max_ang), -max_ang)
 
@@ -46,7 +46,7 @@ class Balanza:
         self.distancia_actual_cm = 0.0
 
     def actualizar(self, dt):
-        # Actualizar servo y asignar ángulo real de balanza
+        
         self.servo.actualizar(dt)
         self.angulo = self.servo.angulo_actual
 
