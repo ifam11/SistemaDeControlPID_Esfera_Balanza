@@ -1,237 +1,210 @@
 import pygame
 import math
-import time
-from pid import ControladorPID 
+from config import *
 
-# Configuración
-ANCHO, ALTO = 800, 600
-FPS = 60
-
-# Colores
-FONDO = (30, 30, 35)
-ACERO = (100, 110, 120)
-ACERO_OSCURO = (60, 70, 80)
-BASE = (50, 50, 50)
-NARANJA = (230, 100, 40)
-BRILLO = (255, 180, 120)
-SENSOR = (200, 50, 50)
-
-# Física
-GRAVEDAD = 9.81
-LONGITUD_VIGA = 600
-GROSOR_VIGA = 14
-RADIO_ESFERA = 20
-MAX_ANGULO = 0.45 
-FACTOR_PESO = 0.003 
-
-# Inicialización
-pygame.init()
-pygame.font.init()
-pantalla = pygame.display.set_mode((ANCHO, ALTO))
-pygame.display.set_caption("Simulación de la balanza con PID")
-reloj = pygame.time.Clock()
-
-# PID con valores para probar
-controlador = ControladorPID(
-    kp=0.11,
-    ki=0.0015,
-    kd=0.0035,
-    output_limits=(-0.5, 0.5),    # límite de la salida del PID (representa parte del ángulo objetivo)
-    integral_limit=0.5,          # anti-windup: límite absoluto de la integral
-    deriv_filter_alpha=0.7       # filtrado exponencial para la derivada (0..1)
-)
-# Variables de estado
-bola_pos = 50 
-bola_vel = 0
-angulo_viga = 0
-tiempo_anterior = time.time()
-ejecutando = True
-
-punto_referencia = 0.0      # setpoint en mismas unidades que pos_bola
-pausado = False
-mostrar_info = True
-registrar = False           # control de logging a CSV
-tiempo_inicio = time.time()
-fuente = pygame.font.SysFont("consolas", 16)
-
-def dibujar_rect_rotado(surface, color, cx, cy, w, h, angulo):
+def rotar(x, y, cx, cy, angulo):
     cos_a = math.cos(angulo)
     sin_a = math.sin(angulo)
-    hw, hh = w / 2, h / 2
-    
-    p1 = (cx + (-hw * cos_a - -hh * sin_a), cy + (-hw * sin_a + -hh * cos_a))
-    p2 = (cx + (hw * cos_a - -hh * sin_a), cy + (hw * sin_a + -hh * cos_a))
-    p3 = (cx + (hw * cos_a - hh * sin_a), cy + (hw * sin_a + hh * cos_a))
-    p4 = (cx + (-hw * cos_a - hh * sin_a), cy + (-hw * sin_a + hh * cos_a))
+    dx = x - cx
+    dy = y - cy
+    return cx + (dx * cos_a - dy * sin_a), cy + (dx * sin_a + dy * cos_a)
 
-    pygame.draw.polygon(surface, color, [p1, p2, p3, p4])
-    pygame.draw.polygon(surface, ACERO_OSCURO, [p1, p2, p3, p4], 2)
-    return p1, p2
+class Balanza:
+    def __init__(self, x, y):
+        self.x, self.y = x, y
+        self.angulo = 0.0
+        self.vel_angular = 0.0
+        self.distancia_actual_cm = 0.0
 
-while ejecutando:
-    ahora = time.time()
-    dt = ahora - tiempo_anterior
-    tiempo_anterior = ahora
+    def actualizar_fisica(self, torque_bola):
+        # Péndulo simple
+        torque_gravedad = -0.08 * math.sin(self.angulo)
+        
+        accel = (torque_bola + torque_gravedad) * 0.1
+        self.vel_angular += accel
+        self.vel_angular *= 0.96
+        self.angulo += self.vel_angular
+        
+        if self.angulo > 0.5: self.angulo = 0.5; self.vel_angular *= -0.2
+        if self.angulo < -0.5: self.angulo = -0.5; self.vel_angular *= -0.2
 
-    for evento in pygame.event.get():
-        if evento.type == pygame.QUIT:
-            ejecutando = False
-        if evento.type == pygame.MOUSEBUTTONDOWN:
-            mouseX, _ = pygame.mouse.get_pos()
-            if evento.button == 1:
-                fuerza = -300 if mouseX > ANCHO/2 else 300
-                bola_vel += fuerza
-            elif evento.button == 3:
-                    # convertir coordenada de píxeles a unidades de pos_bola
-                    rel_x = mouseX - (ANCHO // 2)
-                    escala = (LONGITUD_VIGA / 2) / (ANCHO / 2)
-                    punto_referencia = max(- (LONGITUD_VIGA / 2 - RADIO_ESFERA),
-                                        min((LONGITUD_VIGA / 2 - RADIO_ESFERA), rel_x * escala))
-      
-        # ---------------------------
-        # Manejo de teclado: pausa, reset, mostrar info, tuning en tiempo real, logging
-        # ---------------------------
-        # ### MODIFICACIÓN:
-        # - Teclas Q/A: incrementar/disminuir kp
-        # - Teclas W/S: incrementar/disminuir ki
-        # - Teclas E/D: incrementar/disminuir kd
-        # - R: reset del PID (limpia integral y errores previos)
-        # - SPACE: pausa
-        # - I: mostrar/ocultar info
-        # - L: activar/desactivar logging a CSV
-        if evento.type == pygame.KEYDOWN:
-            if evento.key == pygame.K_SPACE:
-                pausado = not pausado
-            elif evento.key == pygame.K_r:
-                controlador.reset()
-            elif evento.key == pygame.K_i:
-                mostrar_info = not mostrar_info
-            elif evento.key == pygame.K_q:
-                controlador.kp += 0.0005
-            elif evento.key == pygame.K_a:
-                controlador.kp = max(0.0, controlador.kp - 0.0005)
-            elif evento.key == pygame.K_w:
-                controlador.ki += 0.0001
-            elif evento.key == pygame.K_s:
-                controlador.ki = max(0.0, controlador.ki - 0.0001)
-            elif evento.key == pygame.K_e:
-                controlador.kd += 0.0002
-            elif evento.key == pygame.K_d:
-                controlador.kd = max(0.0, controlador.kd - 0.0002)
-            elif evento.key == pygame.K_l:
-                registrar = not registrar
-                if registrar:
-                    # Crear/reescribir archivo CSV de registro
-                    with open("registro_simulacion.csv", "w") as f:
-                        f.write("t,bola_pos,punto_referencia,angulo_viga,kp,ki,kd\n")
+    def leer_sensor(self, bola):
+        # 1. Geometría
+        mitad_ancho = LARGO_VIGA_PX / 2
+        pos_sensor_local = mitad_ancho - GROSOR_TOPE
+        
+        # 2. Posición local bola
+        dx = bola.x - self.x
+        dy = bola.y - self.y
+        cos_inv = math.cos(-self.angulo)
+        sin_inv = math.sin(-self.angulo)
+        local_x = dx * cos_inv - dy * sin_inv
+        local_y = dx * sin_inv + dy * cos_inv
 
-    if pausado:
-        # Mantener renderizado pero no actualizar estados físicos
-        pantalla.fill(FONDO)
-        cx, cy = ANCHO // 2, ALTO // 2 + 50
+        # 3. ¿El sensor ve la bola? (CORRECCIÓN DE ALTURA)
+        limite_izq = -mitad_ancho + GROSOR_TOPE
+        limite_der = mitad_ancho - GROSOR_TOPE
+        
+        # Calculamos dónde está la bola cuando rueda sobre la viga
+        # Altura superficie = -GROSOR_VIGA/2 (-12.5 px)
+        # Centro bola = Altura superficie - RADIO_BOLA_PX (-30 px) -> Total: -42.5 px
+        altura_reposo = - (GROSOR_VIGA / 2) - RADIO_BOLA_PX 
+        
+        # Definimos el "Haz del Láser":
+        # Si la bola sube un poco (rebote) el sensor aún la ve.
+        # Pero si sube más de 1.5 radios (aprox 45px hacia arriba), el láser pasa por debajo.
+        # Rango válido: Desde un poco abajo de la superficie (por error gráfico) hasta 1.5 radios arriba.
+        limite_altura_superior = altura_reposo - (RADIO_BOLA_PX * 1.5) # Si sube más que esto, no se ve
+        
+        # Condición estricta:
+        # 1. Estar horizontalmente entre los topes
+        # 2. Estar verticalmente tocando o casi tocando la viga
+        en_rango = (limite_izq < local_x < limite_der) and (limite_altura_superior < local_y < 10)
 
-        pygame.draw.polygon(pantalla, BASE, [(cx, cy), (cx - 50, cy + 100), (cx + 50, cy + 100)])
-        extremo_izq, extremo_der = dibujar_rect_rotado(pantalla, ACERO, cx, cy, LONGITUD_VIGA, GROSOR_VIGA, angulo_viga)
+        if en_rango:
+            # El sensor ve la bola
+            dist_px = pos_sensor_local - local_x - RADIO_BOLA_PX
+            self.distancia_actual_cm = dist_px / PIXELES_POR_CM
+            if self.distancia_actual_cm < 0: self.distancia_actual_cm = 0
+        else:
+            # El sensor NO ve la bola (está volando muy alto o fuera de límites)
+            # Mide hasta el tope izquierdo (Fondo de escala)
+            dist_px = pos_sensor_local - limite_izq
+            self.distancia_actual_cm = dist_px / PIXELES_POR_CM
 
-        pygame.draw.circle(pantalla, SENSOR, (int(extremo_izq[0]), int(extremo_izq[1])), 6)
-        pygame.draw.circle(pantalla, SENSOR, (int(extremo_der[0]), int(extremo_der[1])), 6)
+        return self.distancia_actual_cm
 
-        offset_altura = (GROSOR_VIGA / 2) + RADIO_ESFERA
-        bx = cx + bola_pos * math.cos(angulo_viga) + offset_altura * math.sin(angulo_viga)
-        by = cy + bola_pos * math.sin(angulo_viga) - offset_altura * math.cos(angulo_viga)
+    def dibujar(self, superficie, fuente_numeros):
+        rad = self.angulo
+        cx, cy = self.x, self.y
+        w, h = LARGO_VIGA_PX, GROSOR_VIGA
 
-        pygame.draw.circle(pantalla, NARANJA, (int(bx), int(by)), RADIO_ESFERA)
-        pygame.draw.circle(pantalla, (50, 20, 0), (int(bx), int(by)), RADIO_ESFERA, 1)
-        pygame.draw.circle(pantalla, BRILLO, (int(bx - 5), int(by - 5)), 6)
+        # Base
+        pygame.draw.polygon(superficie, BASE_OSCURA, [(cx, cy), (cx-40, ALTURA_PISO), (cx+40, ALTURA_PISO)])
+        pygame.draw.circle(superficie, (150,150,150), (cx, cy), 8)
 
-        # Mostrar información si está activada
-        if mostrar_info:
-            error = punto_referencia - bola_pos
-            lineas = [
-                f"KP: {controlador.kp:.6f}  KI: {controlador.ki:.6f}  KD: {controlador.kd:.6f}",
-                f"Pos bola: {bola_pos:.2f}  Referencia: {punto_referencia:.2f}  Error: {error:.2f}",
-                f"Angulo viga: {angulo_viga:.4f}",
-                f"Pausa: {'ON' if pausado else 'OFF'}  Logging: {'ON' if registrar else 'OFF'}",
-                "Teclas: Q/A kp, W/S ki, E/D kd, R reset, SPACE pausa, I info, L log, R-click setpoint"
-            ]
-            for i, txt in enumerate(lineas):
-                surf = fuente.render(txt, True, (220, 220, 220))
-                pantalla.blit(surf, (10, 10 + i * 18))
+        # Viga
+        p1 = rotar(cx - w/2, cy - h/2, cx, cy, rad)
+        p2 = rotar(cx + w/2, cy - h/2, cx, cy, rad)
+        p3 = rotar(cx + w/2, cy + h/2, cx, cy, rad)
+        p4 = rotar(cx - w/2, cy + h/2, cx, cy, rad)
+        pygame.draw.polygon(superficie, MADERA_CLARA, [p1, p2, p3, p4])
+        pygame.draw.polygon(superficie, MADERA_OSCURA, [p1, p2, p3, p4], 2)
 
-        pygame.display.flip()
-        reloj.tick(FPS)
-        continue 
-    # 1. PID (Fuerza del motor)
-    salida_pid = controlador.calcular(punto_referencia, bola_pos, dt)
+        # Topes
+        alto_tope = 30
+        t1 = rotar(cx - w/2, cy - h/2 - alto_tope, cx, cy, rad)
+        t2 = rotar(cx - w/2 + GROSOR_TOPE, cy - h/2 - alto_tope, cx, cy, rad)
+        t3 = rotar(cx - w/2 + GROSOR_TOPE, cy - h/2, cx, cy, rad)
+        pygame.draw.polygon(superficie, MADERA_OSCURA, [t1, t2, t3, p1]) 
 
-    # 2. Física del Peso (Torque natural)
-    # Si la bola está a la derecha (+), inclina la tabla hacia abajo a la derecha (+)
-    torque_peso = bola_pos * FACTOR_PESO
+        s1 = rotar(cx + w/2 - GROSOR_TOPE, cy - h/2 - alto_tope, cx, cy, rad)
+        s2 = rotar(cx + w/2, cy - h/2 - alto_tope, cx, cy, rad)
+        s4 = rotar(cx + w/2 - GROSOR_TOPE, cy - h/2, cx, cy, rad)
+        pygame.draw.polygon(superficie, ROJO_SENSOR, [s1, s2, p2, s4])
 
-    # El ángulo final es la lucha entre el motor (PID) y el peso de la bola
-    angulo_objetivo = salida_pid + torque_peso
-    angulo_objetivo = max(-MAX_ANGULO, min(MAX_ANGULO, angulo_objetivo))
-    
+        # Regla
+        for cm in range(0, LARGO_VIGA_CM + 1):
+            x_local = (cm - 15) * PIXELES_POR_CM
+            if x_local < -w/2 + GROSOR_TOPE or x_local > w/2 - GROSOR_TOPE: continue
+            largo = 15 if cm % 5 == 0 else 8
+            m_top = rotar(cx + x_local, cy - h/2, cx, cy, rad)
+            m_bot = rotar(cx + x_local, cy - h/2 + largo, cx, cy, rad)
+            pygame.draw.line(superficie, TEXTO_REGLA, m_top, m_bot, 1)
+            if cm % 5 == 0:
+                pos = rotar(cx + x_local, cy + 5, cx, cy, rad)
+                txt = fuente_numeros.render(str(cm), True, TEXTO_REGLA)
+                rect = txt.get_rect(center=(int(pos[0]), int(pos[1])))
+                superficie.blit(txt, rect)
 
-    # Simulación de inercia de la viga
-    diferencia = angulo_objetivo  - angulo_viga
-    angulo_viga += diferencia * 10.0 * dt
-
-    # Física Bola
-    # Gravedad alta para sensación de peso
-    aceleracion = GRAVEDAD * 200 * math.sin(angulo_viga)
-    bola_vel += aceleracion * dt
-    bola_pos += bola_vel * dt
-    
-    bola_vel *= 0.999 # Fricción casi nula
-
-    # Colisiones
-    limite_fisico = (LONGITUD_VIGA / 2) - RADIO_ESFERA
-    if bola_pos > limite_fisico:
-        bola_pos = limite_fisico
-        bola_vel *= -0.3
-    elif bola_pos < -limite_fisico:
-        bola_pos = -limite_fisico
-        bola_vel *= -0.3
-
-    if registrar:
-        t = time.time() - tiempo_inicio
-        with open("registro_simulacion.csv", "a") as f:
-            f.write(f"{t:.4f},{bola_pos:.4f},{punto_referencia:.4f},{angulo_viga:.6f},{controlador.kp:.6f},{controlador.ki:.6f},{controlador.kd:.6f}\n")
-
-    # Renderizado
-    pantalla.fill(FONDO)
-    cx, cy = ANCHO // 2, ALTO // 2 + 50
-
-    pygame.draw.polygon(pantalla, BASE, [(cx, cy), (cx - 50, cy + 100), (cx + 50, cy + 100)])
-    extremo_izq, extremo_der = dibujar_rect_rotado(pantalla, ACERO, cx, cy, LONGITUD_VIGA, GROSOR_VIGA, angulo_viga)
-
-    pygame.draw.circle(pantalla, SENSOR, (int(extremo_izq[0]), int(extremo_izq[1])), 6)
-    pygame.draw.circle(pantalla, SENSOR, (int(extremo_der[0]), int(extremo_der[1])), 6)
-
-    offset_altura = (GROSOR_VIGA / 2) + RADIO_ESFERA
-    bx = cx + bola_pos * math.cos(angulo_viga) + offset_altura * math.sin(angulo_viga)
-    by = cy + bola_pos * math.sin(angulo_viga) - offset_altura * math.cos(angulo_viga)
-
-    pygame.draw.circle(pantalla, NARANJA, (int(bx), int(by)), RADIO_ESFERA)
-    pygame.draw.circle(pantalla, (50, 20, 0), (int(bx), int(by)), RADIO_ESFERA, 1)
-    pygame.draw.circle(pantalla, BRILLO, (int(bx - 5), int(by - 5)), 6)
-
-    if mostrar_info:
-        error = punto_referencia - bola_pos
-        lineas = [
-            f"KP: {controlador.kp:.6f}  KI: {controlador.ki:.6f}  KD: {controlador.kd:.6f}",
-            f"Pos bola: {bola_pos:.2f}  Referencia: {punto_referencia:.2f}  Error: {error:.2f}",
-            f"Angulo viga: {angulo_viga:.4f}  PID_out: {salida_pid:.4f}",
-            f"Pausa: {'ON' if pausado else 'OFF'}  Logging: {'ON' if registrar else 'OFF'}",
-            "Teclas: Q/A kp, W/S ki, E/D kd, R reset, SPACE pausa, I info, L log, R-click setpoint"
-        ]
-        for i, txt in enumerate(lineas):
-            surf = fuente.render(txt, True, (220, 220, 220))
-            pantalla.blit(surf, (10, 10 + i * 18))
+        # Láser
+        inicio_laser = rotar(cx + w/2 - GROSOR_TOPE, cy - h/2 - RADIO_BOLA_PX/2, cx, cy, rad)
+        largo_laser_px = self.distancia_actual_cm * PIXELES_POR_CM
+        fin_laser_x = inicio_laser[0] - math.cos(rad) * largo_laser_px
+        fin_laser_y = inicio_laser[1] - math.sin(rad) * largo_laser_px
+        pygame.draw.line(superficie, LASER, inicio_laser, (fin_laser_x, fin_laser_y), 2)
 
 
-    pygame.display.flip()
-    reloj.tick(FPS)
+class Pelota:
+    def __init__(self, x, y):
+        self.x, self.y = x, y
+        self.vx, self.vy = 0, 0
+        self.agarrada = False
 
-pygame.quit()
+    def actualizar(self, balanza):
+        # MOUSE: Mueve la bola, pero la balanza sigue activa con peso 0
+        if self.agarrada:
+            mx, my = pygame.mouse.get_pos()
+            self.x, self.y = mx, my
+            self.vx, self.vy = 0, 0
+            balanza.actualizar_fisica(0)
+            return
+
+        # FÍSICA NORMAL
+        self.vy += GRAVEDAD
+        self.x += self.vx; self.y += self.vy
+        
+        # Paredes y Piso
+        if self.x < RADIO_BOLA_PX: self.x = RADIO_BOLA_PX; self.vx *= -REBOTE_PAREDES
+        if self.x > ANCHO - RADIO_BOLA_PX: self.x = ANCHO - RADIO_BOLA_PX; self.vx *= -REBOTE_PAREDES
+        if self.y < RADIO_BOLA_PX: self.y = RADIO_BOLA_PX; self.vy *= -REBOTE_PAREDES
+        if self.y > ALTURA_PISO - RADIO_BOLA_PX:
+            self.y = ALTURA_PISO - RADIO_BOLA_PX; self.vy *= -REBOTE_SUELO; self.vx *= 0.9
+
+        # Interacción Bola-Viga
+        self._resolver_colision_viga(balanza)
+
+    def _resolver_colision_viga(self, balanza):
+        dx = self.x - balanza.x
+        dy = self.y - balanza.y
+        cos_inv = math.cos(-balanza.angulo)
+        sin_inv = math.sin(-balanza.angulo)
+        local_x = dx * cos_inv - dy * sin_inv
+        local_y = dx * sin_inv + dy * cos_inv
+
+        mitad_w = LARGO_VIGA_PX / 2
+        mitad_h = GROSOR_VIGA / 2
+
+        # ¿Dentro de la viga?
+        if -mitad_w < local_x < mitad_w:
+            # ¿Tocando la superficie superior?
+            if -GROSOR_VIGA - RADIO_BOLA_PX < local_y < -mitad_h + 5:
+                
+                # Topes
+                limite_izq = -mitad_w + GROSOR_TOPE + RADIO_BOLA_PX
+                limite_der = mitad_w - GROSOR_TOPE - RADIO_BOLA_PX
+                
+                if local_x < limite_izq: 
+                    local_x = limite_izq
+                    self._rebotar_tangente(balanza, -1)
+                elif local_x > limite_der: 
+                    local_x = limite_der
+                    self._rebotar_tangente(balanza, 1)
+
+                local_y = -mitad_h - RADIO_BOLA_PX
+                self.x = balanza.x + (local_x * math.cos(balanza.angulo) - local_y * math.sin(balanza.angulo))
+                self.y = balanza.y + (local_x * math.sin(balanza.angulo) + local_y * math.cos(balanza.angulo))
+                
+                accel = 0.4 * math.sin(balanza.angulo)
+                vel_t = self.vx * math.cos(balanza.angulo) + self.vy * math.sin(balanza.angulo)
+                vel_t += accel
+                self.vx = vel_t * math.cos(balanza.angulo)
+                self.vy = vel_t * math.sin(balanza.angulo)
+                
+                # Peso sobre la balanza
+                balanza.actualizar_fisica(local_x * 0.002)
+                return
+
+        # Bola en el aire: Peso 0 para la balanza
+        balanza.actualizar_fisica(0)
+
+    def _rebotar_tangente(self, balanza, lado):
+        vel_t = self.vx * math.cos(balanza.angulo) + self.vy * math.sin(balanza.angulo)
+        if (lado == -1 and vel_t < 0) or (lado == 1 and vel_t > 0):
+            vel_t *= -0.5
+            self.vx = vel_t * math.cos(balanza.angulo)
+            self.vy = vel_t * math.sin(balanza.angulo)
+
+    def dibujar(self, superficie):
+        pygame.draw.circle(superficie, NEGRO, (int(self.x), int(self.y)), RADIO_BOLA_PX)
+        pygame.draw.circle(superficie, (80, 80, 80), (int(self.x - 5), int(self.y - 5)), 5)
