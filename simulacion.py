@@ -1,258 +1,130 @@
 import pygame
-import math
-import time
-from pid import ControladorPID 
+import numpy as np
+import random
+from config import *
 
-# Configuración
-ANCHO, ALTO = 800, 600
-FPS = 60
+class Sistema:
+    def __init__(self):
+        self.pos_m = 0.0
+        self.vel_m = 0.0
+        self.angulo = 0.0
+        self.angulo_target = 0.0
 
-# Colores
-FONDO = (30, 30, 35)
-ACERO = (100, 110, 120)
-ACERO_OSCURO = (60, 70, 80)
-BASE = (50, 50, 50)
-NARANJA = (230, 100, 40)
-BRILLO = (255, 180, 120)
-SENSOR = (200, 50, 50)
+    def update(self, dt, control_output):
+        MAX_ANG = np.radians(35)
+        self.angulo_target = max(min(control_output, MAX_ANG), -MAX_ANG)
 
-# Física
-GRAVEDAD = 9.81
-LONGITUD_VIGA = 600
-GROSOR_VIGA = 14
-RADIO_ESFERA = 20
-MAX_ANGULO = 0.45 
-FACTOR_PESO = 0.003 
+        # Simulación servo
+        diff = self.angulo_target - self.angulo
+        velocidad_servo = 5.0 * dt
+        if abs(diff) < velocidad_servo:
+            self.angulo = self.angulo_target
+        else:
+            self.angulo += velocidad_servo * np.sign(diff)
 
-# Inicialización
-pygame.init()
-pygame.font.init()
-pantalla = pygame.display.set_mode((ANCHO, ALTO))
-pygame.display.set_caption("Simulación de la balanza con PID")
-reloj = pygame.time.Clock()
+        # Física
+        accel = (5.0 / 7.0) * GRAVEDAD * np.sin(self.angulo)
+        self.vel_m += accel * dt
+        self.vel_m *= 0.995
+        self.pos_m += self.vel_m * dt
 
-# PID con valores para probar
-controlador = ControladorPID(
-    kp=0.11,
-    ki=0.0015,
-    kd=0.0035,
-    output_limits=(-0.5, 0.5),    # límite de la salida del PID (representa parte del ángulo objetivo)
-    integral_limit=0.5,          # anti-windup: límite absoluto de la integral
-    deriv_filter_alpha=0.7       # filtrado exponencial para la derivada (0..1)
-)
-# Variables de estado
-bola_pos = 50 
-bola_vel = 0
-angulo_viga = 0
-tiempo_anterior = time.time()
-ejecutando = True
+        # Topes físicos
+        limite_m = (L_RIEL_M / 2.0) - (RADIO_BOLA_PX / ESCALA)
+        if self.pos_m > limite_m:
+            self.pos_m, self.vel_m = limite_m, 0
+        elif self.pos_m < -limite_m:
+            self.pos_m, self.vel_m = -limite_m, 0
 
-punto_referencia = 0.0      # setpoint en mismas unidades que pos_bola
-pausado = False
-mostrar_info = True
-registrar = False           # control de logging a CSV
-tiempo_inicio = time.time()
-fuente = pygame.font.SysFont("consolas", 16)
-fuente_pequena = pygame.font.SysFont("consolas", 16)
-fuente_grande = pygame.font.SysFont("consolas", 20, bold=True)
+    def leer_sensor_cm(self):
+        lectura = 15.0 - (self.pos_m * 100.0)
+        return lectura + random.gauss(0, 0.05)
 
-def dibujar_rect_rotado(surface, color, cx, cy, w, h, angulo):
-    cos_a = math.cos(angulo)
-    sin_a = math.sin(angulo)
-    hw, hh = w / 2, h / 2
-    
-    p1 = (cx + (-hw * cos_a - -hh * sin_a), cy + (-hw * sin_a + -hh * cos_a))
-    p2 = (cx + (hw * cos_a - -hh * sin_a), cy + (hw * sin_a + -hh * cos_a))
-    p3 = (cx + (hw * cos_a - hh * sin_a), cy + (hw * sin_a + hh * cos_a))
-    p4 = (cx + (-hw * cos_a - hh * sin_a), cy + (-hw * sin_a + hh * cos_a))
+# ---------- DIBUJO ----------
 
-    pygame.draw.polygon(surface, color, [p1, p2, p3, p4])
-    pygame.draw.polygon(surface, ACERO_OSCURO, [p1, p2, p3, p4], 2)
-    return p1, p2
+def dibujar_gradiente_riel(surf, p1, p2, ancho):
+    vec = np.array(p2) - np.array(p1)
+    longitud = np.linalg.norm(vec)
+    angulo = np.arctan2(vec[1], vec[0])
 
-def dibujar_panel_info(surface, controlador, bola_pos, punto_referencia, angulo_viga, salida_pid, pausado, registrar):
-    # Panel lateral derecho
-    panel_x = ANCHO - 260
-    panel_y = 20
-    panel_ancho = 240
-    panel_alto = 300
+    surf_riel = pygame.Surface((int(longitud), ancho), pygame.SRCALPHA)
 
-    # Fondo semitransparente
-    panel_surface = pygame.Surface((panel_ancho, panel_alto))
-    panel_surface.set_alpha(120)
-    panel_surface.fill((40, 40, 45))
-    surface.blit(panel_surface, (panel_x, panel_y))
+    pygame.draw.rect(surf_riel, ALUMINIO_OSCURO, (0, 0, longitud, ancho))
+    pygame.draw.rect(surf_riel, ALUMINIO_CLARO, (0, 2, longitud, ancho - 4))
+    pygame.draw.rect(surf_riel, (255, 255, 255), (0, 5, longitud, 4))
 
-    # Títulos y datos
-    y = panel_y + 10
-    surface.blit(fuente_grande.render("Información", True, (255, 220, 180)), (panel_x + 10, y))
-    y += 35
-
-    # PID
-    surface.blit(fuente_pequena.render("PID:", True, (200, 200, 200)), (panel_x + 10, y))
-    y += 20
-    surface.blit(fuente_pequena.render(f"KP: {controlador.kp:.6f}", True, (220, 220, 220)), (panel_x + 20, y)); y += 20
-    surface.blit(fuente_pequena.render(f"KI: {controlador.ki:.6f}", True, (220, 220, 220)), (panel_x + 20, y)); y += 20
-    surface.blit(fuente_pequena.render(f"KD: {controlador.kd:.6f}", True, (220, 220, 220)), (panel_x + 20, y)); y += 30
-
-    # Estado
-    surface.blit(fuente_pequena.render("Estado del Sistema:", True, (200, 200, 200)), (panel_x + 10, y))
-    y += 20
-    surface.blit(fuente_pequena.render(f"Posición: {bola_pos:.2f}", True, (220, 220, 220)), (panel_x + 20, y)); y += 20
-    surface.blit(fuente_pequena.render(f"Referencia: {punto_referencia:.2f}", True, (220, 220, 220)), (panel_x + 20, y)); y += 20
-    surface.blit(fuente_pequena.render(f"Ángulo: {angulo_viga:.3f}", True, (220, 220, 220)), (panel_x + 20, y)); y += 20
-    surface.blit(fuente_pequena.render(f"Salida PID: {salida_pid:.3f}", True, (220, 220, 220)), (panel_x + 20, y)); y += 30
-
-    # Estado general
-    surface.blit(fuente_pequena.render("Sistema:", True, (200, 200, 200)), (panel_x + 10, y))
-    y += 20
-    surface.blit(fuente_pequena.render(f"Pausa: {'Sí' if pausado else 'No'}", True, (220, 220, 220)), (panel_x + 20, y)); y += 20
-    surface.blit(fuente_pequena.render(f"Registro CSV: {'ON' if registrar else 'OFF'}", True, (220, 220, 220)), (panel_x + 20, y))
-
-while ejecutando:
-    ahora = time.time()
-    dt = ahora - tiempo_anterior
-    tiempo_anterior = ahora
-
-    for evento in pygame.event.get():
-        if evento.type == pygame.QUIT:
-            ejecutando = False
-        if evento.type == pygame.MOUSEBUTTONDOWN:
-            mouseX, _ = pygame.mouse.get_pos()
-            if evento.button == 1:
-                fuerza = -300 if mouseX > ANCHO/2 else 300
-                bola_vel += fuerza
-            elif evento.button == 3:
-                    # convertir coordenada de píxeles a unidades de pos_bola
-                    rel_x = mouseX - (ANCHO // 2)
-                    escala = (LONGITUD_VIGA / 2) / (ANCHO / 2)
-                    punto_referencia = max(- (LONGITUD_VIGA / 2 - RADIO_ESFERA),
-                                        min((LONGITUD_VIGA / 2 - RADIO_ESFERA), rel_x * escala))
-      
-        # ---------------------------
-        # Manejo de teclado: pausa, reset, mostrar info, tuning en tiempo real, logging
-        # ---------------------------
-        # ### MODIFICACIÓN:
-        # - Teclas Q/A: incrementar/disminuir kp
-        # - Teclas W/S: incrementar/disminuir ki
-        # - Teclas E/D: incrementar/disminuir kd
-        # - R: reset del PID (limpia integral y errores previos)
-        # - SPACE: pausa
-        # - I: mostrar/ocultar info
-        # - L: activar/desactivar logging a CSV
-        if evento.type == pygame.KEYDOWN:
-            if evento.key == pygame.K_SPACE:
-                pausado = not pausado
-            elif evento.key == pygame.K_r:
-                controlador.reset()
-            elif evento.key == pygame.K_i:
-                mostrar_info = not mostrar_info
-            elif evento.key == pygame.K_q:
-                controlador.kp += 0.0005
-            elif evento.key == pygame.K_a:
-                controlador.kp = max(0.0, controlador.kp - 0.0005)
-            elif evento.key == pygame.K_w:
-                controlador.ki += 0.0001
-            elif evento.key == pygame.K_s:
-                controlador.ki = max(0.0, controlador.ki - 0.0001)
-            elif evento.key == pygame.K_e:
-                controlador.kd += 0.0002
-            elif evento.key == pygame.K_d:
-                controlador.kd = max(0.0, controlador.kd - 0.0002)
-            elif evento.key == pygame.K_l:
-                registrar = not registrar
-                if registrar:
-                    # Crear/reescribir archivo CSV de registro
-                    with open("registro_simulacion.csv", "w") as f:
-                        f.write("t,bola_pos,punto_referencia,angulo_viga,kp,ki,kd\n")
-
-    if pausado:
-        # Mantener renderizado pero no actualizar estados físicos
-        pantalla.fill(FONDO)
-        cx, cy = ANCHO // 2, ALTO // 2 + 50
-
-        pygame.draw.polygon(pantalla, BASE, [(cx, cy), (cx - 50, cy + 100), (cx + 50, cy + 100)])
-        extremo_izq, extremo_der = dibujar_rect_rotado(pantalla, ACERO, cx, cy, LONGITUD_VIGA, GROSOR_VIGA, angulo_viga)
-
-        pygame.draw.circle(pantalla, SENSOR, (int(extremo_izq[0]), int(extremo_izq[1])), 6)
-        pygame.draw.circle(pantalla, SENSOR, (int(extremo_der[0]), int(extremo_der[1])), 6)
-
-        offset_altura = (GROSOR_VIGA / 2) + RADIO_ESFERA
-        bx = cx + bola_pos * math.cos(angulo_viga) + offset_altura * math.sin(angulo_viga)
-        by = cy + bola_pos * math.sin(angulo_viga) - offset_altura * math.cos(angulo_viga)
-
-        pygame.draw.circle(pantalla, NARANJA, (int(bx), int(by)), RADIO_ESFERA)
-        pygame.draw.circle(pantalla, (50, 20, 0), (int(bx), int(by)), RADIO_ESFERA, 1)
-        pygame.draw.circle(pantalla, BRILLO, (int(bx - 5), int(by - 5)), 6)
-
-        # Mostrar información si está activada
-        if mostrar_info:
-            dibujar_panel_info(pantalla, controlador, bola_pos, punto_referencia, angulo_viga, salida_pid, pausado, registrar)
-
-        pygame.display.flip()
-        reloj.tick(FPS)
-        continue 
-    # 1. PID (Fuerza del motor)
-    salida_pid = controlador.calcular(punto_referencia, bola_pos, dt)
-
-    # 2. Física del Peso (Torque natural)
-    # Si la bola está a la derecha (+), inclina la tabla hacia abajo a la derecha (+)
-    torque_peso = bola_pos * FACTOR_PESO
-
-    # El ángulo final es la lucha entre el motor (PID) y el peso de la bola
-    angulo_objetivo = salida_pid + torque_peso
-    angulo_objetivo = max(-MAX_ANGULO, min(MAX_ANGULO, angulo_objetivo))
-    
-
-    # Simulación de inercia de la viga
-    diferencia = angulo_objetivo  - angulo_viga
-    angulo_viga += diferencia * 10.0 * dt
-
-    # Física Bola
-    # Gravedad alta para sensación de peso
-    aceleracion = GRAVEDAD * 200 * math.sin(angulo_viga)
-    bola_vel += aceleracion * dt
-    bola_pos += bola_vel * dt
-    
-    bola_vel *= 0.999 # Fricción casi nula
-
-    # Colisiones
-    limite_fisico = (LONGITUD_VIGA / 2) - RADIO_ESFERA
-    if bola_pos > limite_fisico:
-        bola_pos = limite_fisico
-        bola_vel *= -0.3
-    elif bola_pos < -limite_fisico:
-        bola_pos = -limite_fisico
-        bola_vel *= -0.3
-
-    if registrar:
-        t = time.time() - tiempo_inicio
-        with open("registro_simulacion.csv", "a") as f:
-            f.write(f"{t:.4f},{bola_pos:.4f},{punto_referencia:.4f},{angulo_viga:.6f},{controlador.kp:.6f},{controlador.ki:.6f},{controlador.kd:.6f}\n")
-
-    # Renderizado
-    pantalla.fill(FONDO)
-    cx, cy = ANCHO // 2, ALTO // 2 + 50
-
-    pygame.draw.polygon(pantalla, BASE, [(cx, cy), (cx - 50, cy + 100), (cx + 50, cy + 100)])
-    extremo_izq, extremo_der = dibujar_rect_rotado(pantalla, ACERO, cx, cy, LONGITUD_VIGA, GROSOR_VIGA, angulo_viga)
-
-    pygame.draw.circle(pantalla, SENSOR, (int(extremo_izq[0]), int(extremo_izq[1])), 6)
-    pygame.draw.circle(pantalla, SENSOR, (int(extremo_der[0]), int(extremo_der[1])), 6)
-
-    offset_altura = (GROSOR_VIGA / 2) + RADIO_ESFERA
-    bx = cx + bola_pos * math.cos(angulo_viga) + offset_altura * math.sin(angulo_viga)
-    by = cy + bola_pos * math.sin(angulo_viga) - offset_altura * math.cos(angulo_viga)
-
-    pygame.draw.circle(pantalla, NARANJA, (int(bx), int(by)), RADIO_ESFERA)
-    pygame.draw.circle(pantalla, (50, 20, 0), (int(bx), int(by)), RADIO_ESFERA, 1)
-    pygame.draw.circle(pantalla, BRILLO, (int(bx - 5), int(by - 5)), 6)
-
-    if mostrar_info:
-        dibujar_panel_info(pantalla, controlador, bola_pos, punto_referencia, angulo_viga, salida_pid, pausado, registrar)
+    surf_rot = pygame.transform.rotate(surf_riel, -np.degrees(angulo))
+    rect = surf_rot.get_rect(center=((p1[0] + p2[0]) // 2, (p1[1] + p2[1]) // 2))
+    surf.blit(surf_rot, rect)
 
 
-    pygame.display.flip()
-    reloj.tick(FPS)
+def dibujar_base_madera(surf):
+    pygame.draw.rect(surf, MESA_TOP, (0, SUELO_Y, ANCHO, ALTO - SUELO_Y))
 
-pygame.quit()
+    base_rect = pygame.Rect(CX - 150, SUELO_Y, 300, 30)
+    pygame.draw.rect(surf, MADERA_CLARO, base_rect)
+    pygame.draw.rect(surf, MADERA_OSCURO, base_rect, 3)
+
+    for i in range(CX - 140, CX + 150, 20):
+        pygame.draw.line(surf, MADERA_OSCURO, (i, SUELO_Y), (i + 10, SUELO_Y + 30), 1)
+
+    box_x, box_y = CX + 180, SUELO_Y - 50
+    pygame.draw.rect(surf, (10, 10, 10), (box_x, box_y, 140, 60), border_radius=5)
+    pygame.draw.rect(surf, (0, 30, 0), (box_x + 10, box_y + 10, 120, 40))
+    pygame.draw.rect(surf, LCD_FONDO, (box_x + 10, box_y + 10, 120, 40), 2)
+
+    return box_x, box_y
+
+
+def dibujar_sensor_sharp(surf, end_x, end_y, angulo):
+    cos_a, sin_a = np.cos(angulo), np.sin(angulo)
+
+    offset_h = ANCHO_RIEL / 2 + 20
+    sx = end_x + offset_h * sin_a
+    sy = end_y - offset_h * cos_a
+
+    img_sensor = pygame.Surface((40, 20), pygame.SRCALPHA)
+    pygame.draw.rect(img_sensor, (20, 20, 20), (5, 5, 30, 10))
+    pygame.draw.circle(img_sensor, (40, 0, 0), (12, 10), 4)
+    pygame.draw.circle(img_sensor, (40, 0, 0), (28, 10), 4)
+
+    img_rot = pygame.transform.rotate(img_sensor, -np.degrees(angulo))
+    rect = img_rot.get_rect(center=(sx, sy))
+    surf.blit(img_rot, rect)
+
+    base_x = end_x + (ANCHO_RIEL / 2) * sin_a
+    base_y = end_y - (ANCHO_RIEL / 2) * cos_a
+    pygame.draw.line(surf, AZUL_SERVO, (base_x, base_y), (sx, sy), 4)
+
+    end_ray_x = sx - 600 * cos_a
+    end_ray_y = sy - 600 * sin_a
+    pygame.draw.line(surf, (255, 0, 0, 20), (sx, sy), (end_ray_x, end_ray_y), 1)
+
+
+def dibujar_osciloscopio(surf, hist_p, hist_s, hist_a):
+    rect = pygame.Rect(50, SUELO_Y + 30, ANCHO - 100, ALTO - SUELO_Y - 50)
+    pygame.draw.rect(surf, (10, 15, 20), rect)
+    pygame.draw.rect(surf, (50, 60, 70), rect, 2)
+
+    mid_y = rect.centery
+    pygame.draw.line(surf, (0, 100, 0), (rect.left, mid_y), (rect.right, mid_y), 1)
+
+    if len(hist_p) > 2:
+        pts_pos, pts_set, pts_srv = [], [], []
+        scale_y = 8
+
+        for i in range(len(hist_p)):
+            x = rect.right - (len(hist_p) - i) * 2
+            if x < rect.left:
+                continue
+
+            err_pos = (hist_p[i] - 15.0)
+            err_set = (hist_s[i] - 15.0)
+
+            pts_pos.append((x, mid_y - err_pos * scale_y))
+            pts_set.append((x, mid_y - err_set * scale_y))
+            pts_srv.append((x, mid_y - np.degrees(hist_a[i]) * 1.5))
+
+        pygame.draw.lines(surf, ROJO_BOLA, False, pts_pos, 2)
+        pygame.draw.lines(surf, (0, 255, 0), False, pts_set, 1)
+        pygame.draw.lines(surf, AZUL_SERVO, False, pts_srv, 1)
+
