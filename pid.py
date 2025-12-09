@@ -1,5 +1,5 @@
-class ControladorPID:
-    def __init__(self, kp, ki, kd):
+class PID:
+    def __init__(self, kp, ki, kd, setpoint):
         self.kp = kp
         self.ki = ki
         self.kd = kd
@@ -11,15 +11,11 @@ class ControladorPID:
         self.error_prev = 0.0
         self.integral = 0.0
 
-    def calcular(self, medicion_cm, dt):
-        error = self.setpoint - medicion_cm
-
-    def calcular(self, setpoint, valor_actual, dt):
-        error = setpoint - valor_actual
+    def calcular(self, setpoint, medicion_cm, dt):
+        error = setpoint - medicion_cm
         self.integral += error * dt
 
-        derivative = (error - self.prev_error) / dt if dt > 0 else 0
+        derivada = (error - self.prev_error) / dt if dt > 0 else 0
         self.prev_error = error
 
-        salida = (self.kp * error) + (self.ki * self.integral) + (self.kd * derivative)
-        return salida
+        return (self.kp * error) + (self.ki * self.integral) + (self.kd * derivada)
