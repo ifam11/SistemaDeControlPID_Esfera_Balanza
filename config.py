@@ -1,8 +1,7 @@
-# --- PANTALLA ---
-ANCHO, ALTO = 1000, 600
+# --- CONFIGURACIÓN DE PANTALLA ---
+ANCHO = 1200
+ALTO = 800
 FPS = 60
-FONDO = (245, 245, 245)
-TITULO = "Proyecto Balanza con Esfera Sistema de Control PID"
 
 # --- DIMENSIONES FÍSICAS (ESCALA REAL) ---
 PIXELES_POR_CM = 20         
