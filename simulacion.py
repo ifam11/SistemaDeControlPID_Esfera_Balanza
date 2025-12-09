@@ -20,8 +20,6 @@ class Sistema:
         if abs(diff) < velocidad_servo:
             self.angulo = self.angulo_target
         else:
-            # El sensor NO ve la bola (está volando muy alto o fuera de límites)
-            # Mide hasta el tope izquierdo (Fondo de escala)
             dist_px = pos_sensor_local - limite_izq
             self.distancia_actual_cm = dist_px / PIXELES_POR_CM
 
@@ -32,7 +30,7 @@ class Sistema:
         cx, cy = self.x, self.y
         w, h = LARGO_VIGA_PX, GROSOR_VIGA
 
-        # Base
+        # Base Estirada
         pygame.draw.polygon(superficie, BASE_OSCURA, [(cx, cy), (cx-40, ALTURA_PISO), (cx+40, ALTURA_PISO)])
         pygame.draw.circle(superficie, (150,150,150), (cx, cy), 8)
 
