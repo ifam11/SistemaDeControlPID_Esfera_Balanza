@@ -1,5 +1,6 @@
 import pygame
-import math
+from collections import deque
+
 from config import *
 from simulacion import Balanza, Pelota
 from pid import ControladorPID

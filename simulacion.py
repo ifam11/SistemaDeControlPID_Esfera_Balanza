@@ -1,71 +1,24 @@
 import pygame
-import math
+import numpy as np
+import random
 from config import *
 
-def rotar(x, y, cx, cy, angulo):
-    cos_a = math.cos(angulo)
-    sin_a = math.sin(angulo)
-    dx = x - cx
-    dy = y - cy
-    return cx + (dx * cos_a - dy * sin_a), cy + (dx * sin_a + dy * cos_a)
-
-class Balanza:
-    def __init__(self, x, y):
-        self.x, self.y = x, y
+class Sistema:
+    def __init__(self):
+        self.pos_m = 0.0
+        self.vel_m = 0.0
         self.angulo = 0.0
-        self.vel_angular = 0.0
-        self.distancia_actual_cm = 0.0
+        self.angulo_target = 0.0
 
-    def actualizar_fisica(self, torque_bola):
-        # Péndulo simple
-        torque_gravedad = -0.08 * math.sin(self.angulo)
-        
-        accel = (torque_bola + torque_gravedad) * 0.1
-        self.vel_angular += accel
-        self.vel_angular *= 0.96
-        self.angulo += self.vel_angular
-        
-        if self.angulo > 0.5: self.angulo = 0.5; self.vel_angular *= -0.2
-        if self.angulo < -0.5: self.angulo = -0.5; self.vel_angular *= -0.2
+    def update(self, dt, control_output):
+        MAX_ANG = np.radians(35)
+        self.angulo_target = max(min(control_output, MAX_ANG), -MAX_ANG)
 
-    def leer_sensor(self, bola):
-        # 1. Geometría
-        mitad_ancho = LARGO_VIGA_PX / 2
-        pos_sensor_local = mitad_ancho - GROSOR_TOPE
-        
-        # 2. Posición local bola
-        dx = bola.x - self.x
-        dy = bola.y - self.y
-        cos_inv = math.cos(-self.angulo)
-        sin_inv = math.sin(-self.angulo)
-        local_x = dx * cos_inv - dy * sin_inv
-        local_y = dx * sin_inv + dy * cos_inv
-
-        # 3. ¿El sensor ve la bola? (CORRECCIÓN DE ALTURA)
-        limite_izq = -mitad_ancho + GROSOR_TOPE
-        limite_der = mitad_ancho - GROSOR_TOPE
-        
-        # Calculamos dónde está la bola cuando rueda sobre la viga
-        # Altura superficie = -GROSOR_VIGA/2 (-12.5 px)
-        # Centro bola = Altura superficie - RADIO_BOLA_PX (-30 px) -> Total: -42.5 px
-        altura_reposo = - (GROSOR_VIGA / 2) - RADIO_BOLA_PX 
-        
-        # Definimos el "Haz del Láser":
-        # Si la bola sube un poco (rebote) el sensor aún la ve.
-        # Pero si sube más de 1.5 radios (aprox 45px hacia arriba), el láser pasa por debajo.
-        # Rango válido: Desde un poco abajo de la superficie (por error gráfico) hasta 1.5 radios arriba.
-        limite_altura_superior = altura_reposo - (RADIO_BOLA_PX * 1.5) # Si sube más que esto, no se ve
-        
-        # Condición estricta:
-        # 1. Estar horizontalmente entre los topes
-        # 2. Estar verticalmente tocando o casi tocando la viga
-        en_rango = (limite_izq < local_x < limite_der) and (limite_altura_superior < local_y < 10)
-
-        if en_rango:
-            # El sensor ve la bola
-            dist_px = pos_sensor_local - local_x - RADIO_BOLA_PX
-            self.distancia_actual_cm = dist_px / PIXELES_POR_CM
-            if self.distancia_actual_cm < 0: self.distancia_actual_cm = 0
+        # Simulación servo
+        diff = self.angulo_target - self.angulo
+        velocidad_servo = 5.0 * dt
+        if abs(diff) < velocidad_servo:
+            self.angulo = self.angulo_target
         else:
             # El sensor NO ve la bola (está volando muy alto o fuera de límites)
             # Mide hasta el tope izquierdo (Fondo de escala)
