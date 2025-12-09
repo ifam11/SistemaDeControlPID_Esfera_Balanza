@@ -1,7 +1,9 @@
 import pygame
-import math
+from collections import deque
+
 from config import *
-from simulacion import Balanza, Pelota
+from pid import PID
+from simulacion import Sistema, dibujar_todo_realista
 
 def main():
     pygame.init()

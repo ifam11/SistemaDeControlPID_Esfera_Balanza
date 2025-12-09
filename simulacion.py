@@ -1,210 +1,174 @@
 import pygame
-import math
+import numpy as np
+import random
 from config import *
 
-def rotar(x, y, cx, cy, angulo):
-    cos_a = math.cos(angulo)
-    sin_a = math.sin(angulo)
-    dx = x - cx
-    dy = y - cy
-    return cx + (dx * cos_a - dy * sin_a), cy + (dx * sin_a + dy * cos_a)
-
-class Balanza:
-    def __init__(self, x, y):
-        self.x, self.y = x, y
+class Sistema:
+    def __init__(self):
+        self.pos_m = 0.0
+        self.vel_m = 0.0
         self.angulo = 0.0
-        self.vel_angular = 0.0
-        self.distancia_actual_cm = 0.0
+        self.angulo_target = 0.0
 
-    def actualizar_fisica(self, torque_bola):
-        # Péndulo simple
-        torque_gravedad = -0.08 * math.sin(self.angulo)
-        
-        accel = (torque_bola + torque_gravedad) * 0.1
-        self.vel_angular += accel
-        self.vel_angular *= 0.96
-        self.angulo += self.vel_angular
-        
-        if self.angulo > 0.5: self.angulo = 0.5; self.vel_angular *= -0.2
-        if self.angulo < -0.5: self.angulo = -0.5; self.vel_angular *= -0.2
+    def update(self, dt, control_output):
+        MAX_ANG = np.radians(35)
+        self.angulo_target = max(min(control_output, MAX_ANG), -MAX_ANG)
 
-    def leer_sensor(self, bola):
-        # 1. Geometría
-        mitad_ancho = LARGO_VIGA_PX / 2
-        pos_sensor_local = mitad_ancho - GROSOR_TOPE
-        
-        # 2. Posición local bola
-        dx = bola.x - self.x
-        dy = bola.y - self.y
-        cos_inv = math.cos(-self.angulo)
-        sin_inv = math.sin(-self.angulo)
-        local_x = dx * cos_inv - dy * sin_inv
-        local_y = dx * sin_inv + dy * cos_inv
-
-        # 3. ¿El sensor ve la bola? (CORRECCIÓN DE ALTURA)
-        limite_izq = -mitad_ancho + GROSOR_TOPE
-        limite_der = mitad_ancho - GROSOR_TOPE
-        
-        # Calculamos dónde está la bola cuando rueda sobre la viga
-        # Altura superficie = -GROSOR_VIGA/2 (-12.5 px)
-        # Centro bola = Altura superficie - RADIO_BOLA_PX (-30 px) -> Total: -42.5 px
-        altura_reposo = - (GROSOR_VIGA / 2) - RADIO_BOLA_PX 
-        
-        # Definimos el "Haz del Láser":
-        # Si la bola sube un poco (rebote) el sensor aún la ve.
-        # Pero si sube más de 1.5 radios (aprox 45px hacia arriba), el láser pasa por debajo.
-        # Rango válido: Desde un poco abajo de la superficie (por error gráfico) hasta 1.5 radios arriba.
-        limite_altura_superior = altura_reposo - (RADIO_BOLA_PX * 1.5) # Si sube más que esto, no se ve
-        
-        # Condición estricta:
-        # 1. Estar horizontalmente entre los topes
-        # 2. Estar verticalmente tocando o casi tocando la viga
-        en_rango = (limite_izq < local_x < limite_der) and (limite_altura_superior < local_y < 10)
-
-        if en_rango:
-            # El sensor ve la bola
-            dist_px = pos_sensor_local - local_x - RADIO_BOLA_PX
-            self.distancia_actual_cm = dist_px / PIXELES_POR_CM
-            if self.distancia_actual_cm < 0: self.distancia_actual_cm = 0
+        # Simulación servo
+        diff = self.angulo_target - self.angulo
+        velocidad_servo = 5.0 * dt
+        if abs(diff) < velocidad_servo:
+            self.angulo = self.angulo_target
         else:
-            # El sensor NO ve la bola (está volando muy alto o fuera de límites)
-            # Mide hasta el tope izquierdo (Fondo de escala)
-            dist_px = pos_sensor_local - limite_izq
-            self.distancia_actual_cm = dist_px / PIXELES_POR_CM
+            self.angulo += velocidad_servo * np.sign(diff)
 
-        return self.distancia_actual_cm
+        # Física
+        accel = (5.0 / 7.0) * GRAVEDAD * np.sin(self.angulo)
+        self.vel_m += accel * dt
+        self.vel_m *= 0.995
+        self.pos_m += self.vel_m * dt
 
-    def dibujar(self, superficie, fuente_numeros):
-        rad = self.angulo
-        cx, cy = self.x, self.y
-        w, h = LARGO_VIGA_PX, GROSOR_VIGA
+        # Topes físicos
+        limite_m = (L_RIEL_M / 2.0) - (RADIO_BOLA_PX / ESCALA)
+        if self.pos_m > limite_m:
+            self.pos_m, self.vel_m = limite_m, 0
+        elif self.pos_m < -limite_m:
+            self.pos_m, self.vel_m = -limite_m, 0
 
-        # Base
-        pygame.draw.polygon(superficie, BASE_OSCURA, [(cx, cy), (cx-40, ALTURA_PISO), (cx+40, ALTURA_PISO)])
-        pygame.draw.circle(superficie, (150,150,150), (cx, cy), 8)
+    def leer_sensor_cm(self):
+        lectura = 15.0 - (self.pos_m * 100.0)
+        return lectura + random.gauss(0, 0.05)
 
-        # Viga
-        p1 = rotar(cx - w/2, cy - h/2, cx, cy, rad)
-        p2 = rotar(cx + w/2, cy - h/2, cx, cy, rad)
-        p3 = rotar(cx + w/2, cy + h/2, cx, cy, rad)
-        p4 = rotar(cx - w/2, cy + h/2, cx, cy, rad)
-        pygame.draw.polygon(superficie, MADERA_CLARA, [p1, p2, p3, p4])
-        pygame.draw.polygon(superficie, MADERA_OSCURA, [p1, p2, p3, p4], 2)
+# ---------- DIBUJO ----------
 
-        # Topes
-        alto_tope = 30
-        t1 = rotar(cx - w/2, cy - h/2 - alto_tope, cx, cy, rad)
-        t2 = rotar(cx - w/2 + GROSOR_TOPE, cy - h/2 - alto_tope, cx, cy, rad)
-        t3 = rotar(cx - w/2 + GROSOR_TOPE, cy - h/2, cx, cy, rad)
-        pygame.draw.polygon(superficie, MADERA_OSCURA, [t1, t2, t3, p1]) 
+def dibujar_gradiente_riel(surf, p1, p2, ancho):
+    vec = np.array(p2) - np.array(p1)
+    longitud = np.linalg.norm(vec)
+    angulo = np.arctan2(vec[1], vec[0])
 
-        s1 = rotar(cx + w/2 - GROSOR_TOPE, cy - h/2 - alto_tope, cx, cy, rad)
-        s2 = rotar(cx + w/2, cy - h/2 - alto_tope, cx, cy, rad)
-        s4 = rotar(cx + w/2 - GROSOR_TOPE, cy - h/2, cx, cy, rad)
-        pygame.draw.polygon(superficie, ROJO_SENSOR, [s1, s2, p2, s4])
+    surf_riel = pygame.Surface((int(longitud), ancho), pygame.SRCALPHA)
 
-        # Regla
-        for cm in range(0, LARGO_VIGA_CM + 1):
-            x_local = (cm - 15) * PIXELES_POR_CM
-            if x_local < -w/2 + GROSOR_TOPE or x_local > w/2 - GROSOR_TOPE: continue
-            largo = 15 if cm % 5 == 0 else 8
-            m_top = rotar(cx + x_local, cy - h/2, cx, cy, rad)
-            m_bot = rotar(cx + x_local, cy - h/2 + largo, cx, cy, rad)
-            pygame.draw.line(superficie, TEXTO_REGLA, m_top, m_bot, 1)
-            if cm % 5 == 0:
-                pos = rotar(cx + x_local, cy + 5, cx, cy, rad)
-                txt = fuente_numeros.render(str(cm), True, TEXTO_REGLA)
-                rect = txt.get_rect(center=(int(pos[0]), int(pos[1])))
-                superficie.blit(txt, rect)
+    pygame.draw.rect(surf_riel, ALUMINIO_OSCURO, (0, 0, longitud, ancho))
+    pygame.draw.rect(surf_riel, ALUMINIO_CLARO, (0, 2, longitud, ancho - 4))
+    pygame.draw.rect(surf_riel, (255, 255, 255), (0, 5, longitud, 4))
 
-        # Láser
-        inicio_laser = rotar(cx + w/2 - GROSOR_TOPE, cy - h/2 - RADIO_BOLA_PX/2, cx, cy, rad)
-        largo_laser_px = self.distancia_actual_cm * PIXELES_POR_CM
-        fin_laser_x = inicio_laser[0] - math.cos(rad) * largo_laser_px
-        fin_laser_y = inicio_laser[1] - math.sin(rad) * largo_laser_px
-        pygame.draw.line(superficie, LASER, inicio_laser, (fin_laser_x, fin_laser_y), 2)
+    surf_rot = pygame.transform.rotate(surf_riel, -np.degrees(angulo))
+    rect = surf_rot.get_rect(center=((p1[0] + p2[0]) // 2, (p1[1] + p2[1]) // 2))
+    surf.blit(surf_rot, rect)
 
 
-class Pelota:
-    def __init__(self, x, y):
-        self.x, self.y = x, y
-        self.vx, self.vy = 0, 0
-        self.agarrada = False
+def dibujar_base_madera(surf):
+    pygame.draw.rect(surf, MESA_TOP, (0, SUELO_Y, ANCHO, ALTO - SUELO_Y))
 
-    def actualizar(self, balanza):
-        # MOUSE: Mueve la bola, pero la balanza sigue activa con peso 0
-        if self.agarrada:
-            mx, my = pygame.mouse.get_pos()
-            self.x, self.y = mx, my
-            self.vx, self.vy = 0, 0
-            balanza.actualizar_fisica(0)
-            return
+    base_rect = pygame.Rect(CX - 150, SUELO_Y, 300, 30)
+    pygame.draw.rect(surf, MADERA_CLARO, base_rect)
+    pygame.draw.rect(surf, MADERA_OSCURO, base_rect, 3)
 
-        # FÍSICA NORMAL
-        self.vy += GRAVEDAD
-        self.x += self.vx; self.y += self.vy
-        
-        # Paredes y Piso
-        if self.x < RADIO_BOLA_PX: self.x = RADIO_BOLA_PX; self.vx *= -REBOTE_PAREDES
-        if self.x > ANCHO - RADIO_BOLA_PX: self.x = ANCHO - RADIO_BOLA_PX; self.vx *= -REBOTE_PAREDES
-        if self.y < RADIO_BOLA_PX: self.y = RADIO_BOLA_PX; self.vy *= -REBOTE_PAREDES
-        if self.y > ALTURA_PISO - RADIO_BOLA_PX:
-            self.y = ALTURA_PISO - RADIO_BOLA_PX; self.vy *= -REBOTE_SUELO; self.vx *= 0.9
+    for i in range(CX - 140, CX + 150, 20):
+        pygame.draw.line(surf, MADERA_OSCURO, (i, SUELO_Y), (i + 10, SUELO_Y + 30), 1)
 
-        # Interacción Bola-Viga
-        self._resolver_colision_viga(balanza)
+    box_x, box_y = CX + 180, SUELO_Y - 50
+    pygame.draw.rect(surf, (10, 10, 10), (box_x, box_y, 140, 60), border_radius=5)
+    pygame.draw.rect(surf, (0, 30, 0), (box_x + 10, box_y + 10, 120, 40))
+    pygame.draw.rect(surf, LCD_FONDO, (box_x + 10, box_y + 10, 120, 40), 2)
 
-    def _resolver_colision_viga(self, balanza):
-        dx = self.x - balanza.x
-        dy = self.y - balanza.y
-        cos_inv = math.cos(-balanza.angulo)
-        sin_inv = math.sin(-balanza.angulo)
-        local_x = dx * cos_inv - dy * sin_inv
-        local_y = dx * sin_inv + dy * cos_inv
+    return box_x, box_y
 
-        mitad_w = LARGO_VIGA_PX / 2
-        mitad_h = GROSOR_VIGA / 2
 
-        # ¿Dentro de la viga?
-        if -mitad_w < local_x < mitad_w:
-            # ¿Tocando la superficie superior?
-            if -GROSOR_VIGA - RADIO_BOLA_PX < local_y < -mitad_h + 5:
-                
-                # Topes
-                limite_izq = -mitad_w + GROSOR_TOPE + RADIO_BOLA_PX
-                limite_der = mitad_w - GROSOR_TOPE - RADIO_BOLA_PX
-                
-                if local_x < limite_izq: 
-                    local_x = limite_izq
-                    self._rebotar_tangente(balanza, -1)
-                elif local_x > limite_der: 
-                    local_x = limite_der
-                    self._rebotar_tangente(balanza, 1)
+def dibujar_sensor_sharp(surf, end_x, end_y, angulo):
+    cos_a, sin_a = np.cos(angulo), np.sin(angulo)
 
-                local_y = -mitad_h - RADIO_BOLA_PX
-                self.x = balanza.x + (local_x * math.cos(balanza.angulo) - local_y * math.sin(balanza.angulo))
-                self.y = balanza.y + (local_x * math.sin(balanza.angulo) + local_y * math.cos(balanza.angulo))
-                
-                accel = 0.4 * math.sin(balanza.angulo)
-                vel_t = self.vx * math.cos(balanza.angulo) + self.vy * math.sin(balanza.angulo)
-                vel_t += accel
-                self.vx = vel_t * math.cos(balanza.angulo)
-                self.vy = vel_t * math.sin(balanza.angulo)
-                
-                # Peso sobre la balanza
-                balanza.actualizar_fisica(local_x * 0.002)
-                return
+    offset_h = ANCHO_RIEL / 2 + 20
+    sx = end_x + offset_h * sin_a
+    sy = end_y - offset_h * cos_a
 
-        # Bola en el aire: Peso 0 para la balanza
-        balanza.actualizar_fisica(0)
+    img_sensor = pygame.Surface((40, 20), pygame.SRCALPHA)
+    pygame.draw.rect(img_sensor, (20, 20, 20), (5, 5, 30, 10))
+    pygame.draw.circle(img_sensor, (40, 0, 0), (12, 10), 4)
+    pygame.draw.circle(img_sensor, (40, 0, 0), (28, 10), 4)
 
-    def _rebotar_tangente(self, balanza, lado):
-        vel_t = self.vx * math.cos(balanza.angulo) + self.vy * math.sin(balanza.angulo)
-        if (lado == -1 and vel_t < 0) or (lado == 1 and vel_t > 0):
-            vel_t *= -0.5
-            self.vx = vel_t * math.cos(balanza.angulo)
-            self.vy = vel_t * math.sin(balanza.angulo)
+    img_rot = pygame.transform.rotate(img_sensor, -np.degrees(angulo))
+    rect = img_rot.get_rect(center=(sx, sy))
+    surf.blit(img_rot, rect)
 
-    def dibujar(self, superficie):
-        pygame.draw.circle(superficie, NEGRO, (int(self.x), int(self.y)), RADIO_BOLA_PX)
-        pygame.draw.circle(superficie, (80, 80, 80), (int(self.x - 5), int(self.y - 5)), 5)
+    base_x = end_x + (ANCHO_RIEL / 2) * sin_a
+    base_y = end_y - (ANCHO_RIEL / 2) * cos_a
+    pygame.draw.line(surf, AZUL_SERVO, (base_x, base_y), (sx, sy), 4)
+
+    end_ray_x = sx - 600 * cos_a
+    end_ray_y = sy - 600 * sin_a
+    pygame.draw.line(surf, (255, 0, 0, 20), (sx, sy), (end_ray_x, end_ray_y), 1)
+
+
+def dibujar_osciloscopio(surf, hist_p, hist_s, hist_a):
+    rect = pygame.Rect(50, SUELO_Y + 30, ANCHO - 100, ALTO - SUELO_Y - 50)
+    pygame.draw.rect(surf, (10, 15, 20), rect)
+    pygame.draw.rect(surf, (50, 60, 70), rect, 2)
+
+    mid_y = rect.centery
+    pygame.draw.line(surf, (0, 100, 0), (rect.left, mid_y), (rect.right, mid_y), 1)
+
+    if len(hist_p) > 2:
+        pts_pos, pts_set, pts_srv = [], [], []
+        scale_y = 8
+
+        for i in range(len(hist_p)):
+            x = rect.right - (len(hist_p) - i) * 2
+            if x < rect.left:
+                continue
+
+            err_pos = (hist_p[i] - 15.0)
+            err_set = (hist_s[i] - 15.0)
+
+            pts_pos.append((x, mid_y - err_pos * scale_y))
+            pts_set.append((x, mid_y - err_set * scale_y))
+            pts_srv.append((x, mid_y - np.degrees(hist_a[i]) * 1.5))
+
+        pygame.draw.lines(surf, ROJO_BOLA, False, pts_pos, 2)
+        pygame.draw.lines(surf, (0, 255, 0), False, pts_set, 1)
+        pygame.draw.lines(surf, AZUL_SERVO, False, pts_srv, 1)
+
+
+def dibujar_todo_realista(surf, sys, hist_p, hist_s, hist_a, arrastrando):
+    surf.fill(FONDO_LAB)
+
+    theta = sys.angulo
+    cos_t, sin_t = np.cos(theta), np.sin(theta)
+
+    box_x, box_y = dibujar_base_madera(surf)
+
+    # Pivote
+    p1 = (CX - 30, SUELO_Y)
+    p2 = (CX + 30, SUELO_Y)
+    p3 = (CX, CY)
+    pygame.draw.polygon(surf, AZUL_OSCURO, [p1, p2, p3])
+
+    # Riel
+    x1 = CX - (L_RIEL_PX / 2) * cos_t
+    y1 = CY - (L_RIEL_PX / 2) * sin_t
+    x2 = CX + (L_RIEL_PX / 2) * cos_t
+    y2 = CY + (L_RIEL_PX / 2) * sin_t
+
+    pygame.draw.line(surf, (0, 0, 0), (x1, SUELO_Y), (x2, SUELO_Y), ANCHO_RIEL)
+    dibujar_gradiente_riel(surf, (x1, y1), (x2, y2), ANCHO_RIEL)
+
+    dibujar_sensor_sharp(surf, x2, y2, theta)
+
+    # Bola
+    dist_px = sys.pos_m * ESCALA
+    offset_v = RADIO_BOLA_PX + (ANCHO_RIEL / 2)
+
+    bx = CX + dist_px * cos_t + offset_v * sin_t
+    by = CY + dist_px * sin_t - offset_v * cos_t
+
+    color = ROJO_BOLA if not arrastrando else (255, 255, 100)
+    pygame.draw.circle(surf, color, (int(bx), int(by)), RADIO_BOLA_PX)
+
+    # LCD
+    font_lcd = pygame.font.SysFont("Consolas", 20, bold=True)
+    lectura = sys.leer_sensor_cm()
+    txt_lcd = font_lcd.render(f"{lectura:.1f} cm", True, LCD_TEXTO)
+    surf.blit(txt_lcd, (box_x + 20, box_y + 18))
+
+    # Gráfica
+    dibujar_osciloscopio(surf, hist_p, hist_s, hist_a)
