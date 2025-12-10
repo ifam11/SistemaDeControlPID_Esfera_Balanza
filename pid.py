@@ -11,11 +11,16 @@ class PID:
         self.error_prev = 0.0
         self.integral = 0.0
 
-    def calcular(self, setpoint, medicion_cm, dt):
-        error = setpoint - medicion_cm
+    def calcular(self, medicion_cm, dt):
+        error = self.setpoint - medicion_cm
         self.integral += error * dt
+        self.integral = max(min(self.integral, 15.0), -15.0)
 
-        derivada = (error - self.prev_error) / dt if dt > 0 else 0
-        self.prev_error = error
+        if dt > 0:
+            derivada = (error - self.error_prev) / dt
+        else:
+            derivada = 0
+            
+        self.error_prev = error
 
         return (self.kp * error) + (self.ki * self.integral) + (self.kd * derivada)

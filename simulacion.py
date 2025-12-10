@@ -142,6 +142,25 @@ def dibujar_todo_realista(surf, sys, hist_p, hist_s, hist_a, arrastrando):
     p2 = (CX + 30, SUELO_Y)
     p3 = (CX, CY)
     pygame.draw.polygon(surf, AZUL_OSCURO, [p1, p2, p3])
+    pygame.draw.line(surf, AZUL_SERVO, p1, p3, 2)
+    pygame.draw.line(surf, AZUL_SERVO, p2, p3, 2)
+
+    servo_x = CX - L_RIEL_PX/2 + 40
+    servo_y = SUELO_Y - 45
+
+    pygame.draw.rect(surf, (20, 20, 25), (servo_x-15, servo_y-15, 30, 30)) 
+    pygame.draw.circle(surf, AZUL_SERVO, (servo_x, servo_y), 18) # Rueda
+    
+    # Brazo del servo
+    wheel_ang = -theta * 4 + np.pi/2
+    wx = servo_x + 18 * np.cos(wheel_ang)
+    wy = servo_y + 18 * np.sin(wheel_ang)
+    pygame.draw.line(surf, (255, 255, 255), (servo_x, servo_y), (wx, wy), 3)
+    
+    # Varilla de conexión
+    conn_x = CX - (L_RIEL_PX/2 - 40) * cos_t + (ANCHO_RIEL/2 + 5)*sin_t
+    conn_y = CY - (L_RIEL_PX/2 - 40) * sin_t - (ANCHO_RIEL/2 + 5)*cos_t
+    pygame.draw.line(surf, (200, 200, 200), (wx, wy), (conn_x, conn_y), 3)
 
     # Riel
     x1 = CX - (L_RIEL_PX / 2) * cos_t
